@@ -1,0 +1,35 @@
+{
+  "name": "@aws-solutions-constructs/aws-cloudfront-signed-cookies",
+  "version": "0.0.0",
+  "description": "\"CDK Construct that attaches a key group to a cloudfront distribution and adds signed cookies\" ",
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc -b .",
+    "test": "echo 'Ok\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/awslabs/aws-solutions-constructs.git/source/patterns/@aws-solutions-constructs/aws-cloudfront-signed-cookies"
+  },
+  "keywords": [
+    "aws",
+    "cloudfront",
+    "signed",
+    "cookies",
+    "cdk",
+    "typescript",
+    "javascript",
+    "node",
+    "crypto"
+  ],
+  "author": "sguggenh@amazon.com",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@aws-cdk/aws-cloudfront": "^1.101.0",
+    "@aws-cdk/aws-iam": "^1.101.0",
+    "@aws-cdk/aws-lambda": "^1.101.0",
+    "@aws-cdk/core": "^1.101.0",
+    "@types/node": "^15.0.1",
+    "constructs": "^3.3.75"
+  }
+}
