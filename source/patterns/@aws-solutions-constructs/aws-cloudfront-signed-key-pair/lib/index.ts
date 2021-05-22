@@ -14,13 +14,16 @@
 ///<reference types="@types/node"/>
 
 import {Construct,ConstructNode,ResourceEnvironment,Stack,RemovalPolicy} from '@aws-cdk/core';
-import { IPublicKey, PublicKey} from '@aws-cdk/aws-cloudfront';
+import { IPublicKey, PublicKey, Distribution, DistributionProps, BehaviorOptions } from '@aws-cdk/aws-cloudfront';
 import {createSign, generateKeyPairSync} from 'node:crypto';
 import {Buffer} from 'node:buffer';
 import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId} from '@aws-cdk/custom-resources';
 
 export interface SignedKeyPairProps {
     url:string,
+    type:SignedKeyPairType,
+    cloudFrontDistributionProps?: DistributionProps
+    defaultBehaviorOptions?:BehaviorOptions
     expires?:Date | string | number,
     starts?:Date | string | number,
     ipAddress?:string
@@ -46,7 +49,7 @@ export interface SignedKeyPairConditions {
 }
 export interface SignedKeyPairStatement {
     Resource: string
-    Condition?: SignedKeyPairConditions           
+    Condition: SignedKeyPairConditions           
 }
 export interface SignedKeyPairPolicy {
     Statement: SignedKeyPairStatement[]
@@ -98,6 +101,11 @@ export enum SignedUrlName {
     POLICY = 'Policy'
 }
 
+export enum SignedKeyPairType {
+    SIGNED_COOKIE = 'Signed-Cookie',
+    SIGNED_URL = 'Signed-Url'
+}
+
 export interface AwsCustomResourceOptions {
     scope: Construct
     name:string
@@ -146,7 +154,7 @@ export class SignedKeyPair extends Construct implements IPublicKey {
         return this.toString();
     }
 
-    getEdgeLambdaSignedCookieHeaders():SignedCookieEdgeHeaders {
+    get edgeLambdaSignedCookieHeaders():SignedCookieEdgeHeaders {
         return this.signedCookies.split('; ').reduce((acc,cookie) => {
             acc['set-cookie'].push({
                 key:'Set-Cookie',
@@ -156,7 +164,7 @@ export class SignedKeyPair extends Construct implements IPublicKey {
         },{['set-cookie']: []});
     }
 
-    getSignedCookieHeaders():SignedCookieHeaders {
+    get signedCookieHeaders():SignedCookieHeaders {
         return this.signedCookies.split('; ').map(cookie => {
             return {
                 ['Set-Cookie']: cookie
@@ -164,8 +172,8 @@ export class SignedKeyPair extends Construct implements IPublicKey {
         });
     }
 
-    get signature():string {
-        const policy = JSON.stringify(this.policy);
+    getSignature($policy:SignedKeyPairPolicy):string {
+        const policy = JSON.stringify($policy);
         const sign = createSign('sha256')
         sign.update(policy);
         sign.end();
@@ -175,7 +183,23 @@ export class SignedKeyPair extends Construct implements IPublicKey {
         return this.format(sig);
     }
 
-    get policy(): SignedKeyPairPolicy {
+    getSignedUrl(policy:SignedKeyPairPolicy, publicKeyId:string, expires:Date|number|string):string {
+        const signature = this.getSignature(policy);
+        this.url.searchParams.append(SignedUrlName.KEY_PAIR_ID, this.format(publicKeyId));
+        this.url.searchParams.append(SignedUrlName.SIGNATURE,signature);
+        if (this.options.starts || this.options.ipAddress) {
+            this.url.searchParams.append(SignedUrlName.POLICY, this.format(JSON.stringify(policy)));
+        } else {
+            this.url.searchParams.append(SignedUrlName.EXPIRES, this.getExpires(expires).toString());
+        }
+        return this.url.toString();
+    }
+
+    get signedCookies():string {
+        return this.getCookieList().join('; ');
+    }
+
+    private get policy(): SignedKeyPairPolicy {
         const policy:any = {
             Statement: [
                 {
@@ -195,21 +219,6 @@ export class SignedKeyPair extends Construct implements IPublicKey {
             policy.Statement[0].Condition.IpAddress['AWS:SourceIp'] = this.options.ipAddress; 
         }
         return policy;
-    }
-
-    get signedUrl():string {
-        this.url.searchParams.append(SignedUrlName.KEY_PAIR_ID, this.format(this.publicKeyId));
-        this.url.searchParams.append(SignedUrlName.SIGNATURE,this.signature);
-        if (this.options.starts || this.options.ipAddress) {
-            this.url.searchParams.append(SignedUrlName.POLICY, this.format(JSON.stringify(this.policy)));
-        } else {
-            this.url.searchParams.append(SignedUrlName.EXPIRES, this.getExpires().toString());
-        }
-        return this.url.toString();
-    }
-
-    get signedCookies():string {
-        return this.getCookieList().join('; ');
     }
 
     static createKeyPair(options:KeyPairOptions = {}):IKeyPair {
@@ -247,22 +256,22 @@ export class SignedKeyPair extends Construct implements IPublicKey {
         return res as unknown as IKeyPair;
     }
 
-    protected getExpires():number {
-        return this.getEpochTime(this.options.expires, Date.now() + (60*60*24*7*1000), true);
+    protected getExpires(expires:Date | number | string):number {
+        return this.getEpochTime(expires, Date.now() + (60*60*24*7*1000), true);
     }
 
-    protected getStart():number {
-        return this.getEpochTime(this.options.starts, Date.now(), true);
+    protected getStart(starts:Date|number|string):number {
+        return this.getEpochTime(starts, Date.now(), true);
     }
 
 
-    protected getPublicKey(keyId:string): IPublicKey {
-        const publicNm = this.getName(this.id, 'PublicKey');
+    protected getPublicKey(keyId:string, path:string): IPublicKey {
+        const publicNm = this.getName(this.id, 'PublicKey', path.substring(1) || '');
         return PublicKey.fromPublicKeyId(this.scope, publicNm, keyId);
     }
 
-    protected createPublicKey(key:string): IPublicKey {
-        const publicNm = this.getName(this.id, 'PublicKey');
+    protected createPublicKey(key:string, path, keyPairName?:string, comment?:string): IPublicKey {
+        const publicNm = this.getName(this.id, 'PublicKey', path.substring(1) || '');
         const pkName = this.getUniqueName(publicNm);
         const cr = this.customResource({
             scope:this.scope,
@@ -272,25 +281,30 @@ export class SignedKeyPair extends Construct implements IPublicKey {
             parameters: {
                 PublicKeyConfig: {
                     CallerReference: this.getUniqueName(pkName),
-                    Name:this.options.SignedKeyPairName || publicNm,
+                    Name:keyPairName || publicNm,
                     EncodedKey:key,
-                    Comment:this.options.comment,
-
+                    Comment:comment,
                 }
             }
         });
-        return this.getPublicKey(cr.getResponseField('PublicKey.Id'))
+        return this.getPublicKey(cr.getResponseField('PublicKey.Id'), path)
     } 
 
-    private getCookieList():string[] {
+    private getCookieList(
+        publicKeyId:string, 
+        policy:SignedKeyPairPolicy,
+        signature:string, 
+        options:CookieOptions,
+        expires?:Date|number|string
+    ):string[] {
         const res = [
-            this.formatCookie(SignedCookieName.KEY_PAIR_ID,this.publicKeyId,this.options.cookieOptions),
-            this.formatCookie(SignedCookieName.SIGNATURE,this.signature,this.options.cookieOptions)
+            this.formatCookie(SignedCookieName.KEY_PAIR_ID,publicKeyId,options),
+            this.formatCookie(SignedCookieName.SIGNATURE,signature,options)
         ];
         if (this.options.starts || this.options.ipAddress) {
-            res.push(this.formatCookie(SignedCookieName.POLICY,this.policy,this.options.cookieOptions));
+            res.push(this.formatCookie(SignedCookieName.POLICY,policy,this.options));
         } else {
-            res.push(this.formatCookie(SignedCookieName.EXPIRES,this.getExpires(),this.options.cookieOptions));
+            res.push(this.formatCookie(SignedCookieName.EXPIRES,this.getExpires(expires),options));
         }
         return res;
     }
@@ -431,5 +445,15 @@ export class SignedKeyPair extends Construct implements IPublicKey {
                 parameters:params.parameters || {}
             }
         })
+    }
+
+    private getDistribution() {
+        const props:DistributionProps = {
+            defaultBehavior: {
+
+                ...this.options.defaultBehaviorOptions
+            },
+            ...this.options.cloudFrontDistributionProps || {}
+        }
     }
 }

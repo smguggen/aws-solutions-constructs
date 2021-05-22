@@ -18,9 +18,8 @@
 
 | **Language**     | **Package**        |
 |:-------------|-----------------|
-|![Python Logo](https://docs.aws.amazon.com/cdk/api/latest/img/python32.png) Python|`aws_solutions_constructs.aws_cloudfront_s3`|
+`aws_solutions_constructs.aws_cloudfront_s3`|
 |![Typescript Logo](https://docs.aws.amazon.com/cdk/api/latest/img/typescript32.png) Typescript|`@aws-solutions-constructs/aws-cloudfront-s3`|
-|![Java Logo](https://docs.aws.amazon.com/cdk/api/latest/img/java32.png) Java|`software.amazon.awsconstructs.services.cloudfronts3`|
 
 This AWS Solutions Construct implements an AWS CloudFront Key Pair Construct with an auto-generated key pair that can produce Signed Cookies or Signed Urls for use in your CloudFront Distribution. 
 
@@ -54,6 +53,9 @@ _Parameters_
 | **Name**     | **Type**        | **Description** |
 |:-------------|:----------------|-----------------|
 |url|[`string`]|The domain name or full uri to your CloudFront Distribution.|
+|type|[`SignedKeyPairType`](/index.ts)|Whether to use Signed Cookies or Signed Urls with the Cloudfront Distribution|
+|cloudFrontDistributionProps?|[`cloudfront.DistributionProps`](https://docs.aws.amazon.com/cdk/api/latest/docs/@aws-cdk_aws-cloudfront.DistributionProps.html)|Optional user provided props to override the default props for the CloudFront Distribution.|
+|defaultBehaviorOptions?|[`cloudfront.BehaviorOptions`](https://docs.aws.amazon.com/cdk/api/latest/docs/@aws-cdk_aws-cloudfront.BehaviorOptions.html)|Optional user provided props to override the optional props of the signed cookie or url's default behavior|
 |expires?|[`Date | string | number`]| The date or timestamp in which the signed cookie or signed url will expire *(defaults to one week)* |
 |starts?|[`Date | string | number`]|The date or timestamp in which the signed cookie or signed url will start *(defaults to Date.now())* |
 |ipAddress?|[`string`](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-setting-signed-cookie-custom-policy.html#private-content-custom-policy-statement-cookies-values)|The IP address of the client making the GET request|
@@ -69,9 +71,16 @@ _Parameters_
 
 | **Name**     | **Type**        | **Description** |
 |:-------------|:----------------|-----------------|
-
-
-
+|publicKeyId|[`string`]|The Id of the underlying `PublicKey` Construct|
+|publicKey|[`cloudfront.PublicKey`]|The associated `PublicKey` Construct|
+|signedUrl|[`string`]|The Url for the Cloudfront Distribution with the full Signed Url query params appended|
+|signedCookies|['string`]|The signed cookies for use in headers formatted as a cookie string
+|signedCookieHeaders|[`SignedCookieHeaders`](/index.ts)|The signed cookies formatted as headers for use in http calls outside of Lambda@Edge|
+|edgeLambdaSignedCookieHeaders|[`SignedCookieEdgeHeaders`](/index.ts)|The signed cookies formatted as headers for use in http calls within a Lambda@Edge function|
+|signature|[`string`]|The signature generated using the key pair's private key and the policy configured for signed cookies or urls|
+|node|[`ConstructNode`](https://docs.aws.amazon.com/cdk/api/latest/docs/@aws-cdk_core.ConstructNode.html)|The construct tree node associated with the construct. Included to fulfill implementation of `IPublicKey` so it can be supplied as an `item` in a [`KeyGroup`](https://docs.aws.amazon.com/cdk/api/latest/docs/@aws-cdk_aws-cloudfront.KeyGroup.html)|
+|env|[`ResourceEnvironment`](https://docs.aws.amazon.com/cdk/api/latest/docs/@aws-cdk_core.ResourceEnvironment.html)|The environment this resource belongs to. Included to fulfill implementation of `IPublicKey` so it can be supplied as an `item` in a [`KeyGroup`](https://docs.aws.amazon.com/cdk/api/latest/docs/@aws-cdk_aws-cloudfront.KeyGroup.html)|
+|stack|[`Stack`](https://docs.aws.amazon.com/cdk/api/latest/docs/@aws-cdk_core.Stack.html)|The stack in which this resource is defined. Included to fulfill implementation of `IPublicKey` so it can be supplied as an `item` in a [`KeyGroup`](https://docs.aws.amazon.com/cdk/api/latest/docs/@aws-cdk_aws-cloudfront.KeyGroup.html)|
 
 
 ## Default settings
@@ -113,6 +122,7 @@ Options to use when creating [signed cookies](https://docs.aws.amazon.com/Amazon
 |domain?|[`string`]|The domain name for the requested file.|*undefined*|
 |path?|[`string`]|The path for the requested file|*`/`*|
 |sameSite?|[`strict | lax | `none]|How to handle sending cookie along with same-site requests|*undefined*|
+
 
 ***
 &copy; Copyright 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
