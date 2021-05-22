@@ -18,20 +18,18 @@ import { IPublicKey, PublicKey, Distribution, DistributionProps, BehaviorOptions
 import {createSign, generateKeyPairSync} from 'node:crypto';
 import {Buffer} from 'node:buffer';
 import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId} from '@aws-cdk/custom-resources';
-import { IVersion, Version } from '@aws-cdk/aws-lambda';
+import { Function, IVersion, Version } from '@aws-cdk/aws-lambda';
+import { CompositePrincipal, Effect, ManagedPolicy, PolicyStatement, Role, ServicePrincipal } from '@aws-cdk/aws-iam';
 
 export interface SignedKeyPairProps {
     url:string,
     type:SignedKeyPairType
-    defaultOrigin:IOrigin
     signedKeys:(SignedKeyProps | string)[] | string
+    signedBehaviorOptions:BehaviorOptions
     cloudFrontDistributionProps?: DistributionProps
-    defaultPath?:string
-    defaultBehaviorOptions?:BehaviorOptions
+    defaultBehaviorOptions?:Partial<BehaviorOptions>
     defaultKeyPairOptions?:KeyPairOptions
-    defaultCookieOptions?:CookieOptions
-    keyGroupName?:string
-    keyGroupComment?:string
+    defaultCookieOptions?:CookieOptions,
 }
 
 export interface SignedKeyProps {
@@ -151,7 +149,6 @@ export interface AwsCustomResourceOptions {
 
 export class SignedKeyPair extends Construct {
     signedKeys: SignedKeyProps[]
-    defaultPath:string
     private url:URL
 
     constructor(
@@ -163,7 +160,7 @@ export class SignedKeyPair extends Construct {
         this.url = new URL(this.props.url);
         if (typeof props.signedKeys === 'string') props.signedKeys = [props.signedKeys];
         this.signedKeys = props.signedKeys.map(key => typeof key === 'string' ? {path:key} : key);
-        this.defaultPath = props.defaultPath || '/';
+        this.getDistribution();
     }
 
     applyRemovalPolicy(policy:RemovalPolicy):void {
@@ -308,7 +305,7 @@ export class SignedKeyPair extends Construct {
     }
 
     protected createKeyGroup():KeyGroup {
-        const nm = this.props.keyGroupName || this.getName(this.id,'Key-Group');
+        const nm = this.getName(this.id,'Key-Group');
 
         const items = this.signedKeys.map(props => {
             if (typeof props === 'string') props = {path:props}
@@ -317,29 +314,39 @@ export class SignedKeyPair extends Construct {
         },this);
         return new KeyGroup(this.scope,nm, {
             keyGroupName:nm,
-            comment:this.props.keyGroupComment,
             items
         })
     }
 
     protected getDefaultBehavior():BehaviorOptions {
         return {
-            origin:this.props.defaultOrigin,
-            edgeLambdas: [{
-                eventType:LambdaEdgeEventType.VIEWER_RESPONSE,
-                functionVersion:
-            }]
-            ...(this.props.defaultBehaviorOptions || {})
+            edgeLambdas: [this.getEdgeLambda()],
+            ...(this.props.defaultBehaviorOptions || {}),
+            origin:this.props.defaultBehaviorOptions?.origin || this.props.signedBehaviorOptions.origin,
+
         }
     }
 
-    protected getBehaviors():{[name:string]:BehaviorOptions} {
-
+    protected getDistribution():Distribution {
+        const defaultBehavior = this.getDefaultBehavior();
+        const props:DistributionProps = {
+            defaultBehavior,
+            ...(this.props.cloudFrontDistributionProps || {}),
+            additionalBehaviors: {
+                ...(this.props.cloudFrontDistributionProps?.additionalBehaviors || {}),
+                '/*': {
+                    ...this.props.signedBehaviorOptions,
+                    trustedKeyGroups: [this.createKeyGroup()]
+                }
+            },
+            ...(this.props.cloudFrontDistributionProps || {})
+        }
+        return new Distribution(this.scope,this.getName(this.id,'Distribution'), props);
     }
 
-    private getEdgeLambda(path:string):IVersion {
-        const publicNm = this.getName(this.id, 'LambdaFunction', path.substring(1) || '');
-        const pkName = this.getUniqueName(publicNm);
+    private getEdgeLambda():EdgeLambda {
+        const publicNm = this.getName(this.id, 'LambdaFunction');
+        const Role = this.makeLambdaRole(publicNm);
         const policy = AwsCustomResourcePolicy.fromSdkCalls({resources:AwsCustomResourcePolicy.ANY_RESOURCE});
         const resourceOptions = {policy, installLatestAwsSdk:true}
         const eventOptions = {
@@ -347,25 +354,35 @@ export class SignedKeyPair extends Construct {
             physicalResourceId:PhysicalResourceId.fromResponse('FunctionArn'),
             region:'us-east-1'
         }
+        const parameters = {
+            Code: Buffer.from(this.getEdgeLambdaFunction().toString()),
+            FunctionName:publicNm,
+            Publish:true
+        }
         const cr = new AwsCustomResource(this.scope,this.getName(publicNm, 'Resource'),{
             ...resourceOptions,
             onCreate: {
                 ...eventOptions,
                 action:'createFunction',
                 parameters: {
-                    Code: Buffer.from(this.getEdgeLambdaFunction().toString()),
-                    FunctionName:publicNm,
-                    Role:
+                    ...parameters,
+                    Role
                 }
             },
             onUpdate: {
                 ...eventOptions,
                 action:'updateFunctionCode',
-                parameters:{
-                    FunctionName:publicNm
-                }
+                parameters
             }
-        })
+        });
+        const fn = Function.fromFunctionArn(this.scope, this.getName(publicNm,'Function'), cr.getResponseField('FunctionArn'));
+        const vs = new Version(this.scope,this.getName(publicNm,'Version'), {
+            lambda:fn
+        });
+        return {
+            eventType:LambdaEdgeEventType.VIEWER_RESPONSE,
+            functionVersion:vs
+        }
     }
 
     private getEdgeLambdaFunction(): (...a:any[]) => any {
@@ -392,6 +409,24 @@ export class SignedKeyPair extends Construct {
             }
             return callback(null, response);
         }
+    }
+
+    private makeLambdaRole(name:string) {
+        const principal = new CompositePrincipal(
+            new ServicePrincipal('lambda.amazonaws.com'),
+            new ServicePrincipal('edgelambda.amazonaws.com')
+        );
+        const statement = new PolicyStatement({
+            effect:Effect.ALLOW,
+            actions:['sts:assumeRole']
+        });
+        principal.addToPolicy(statement);
+        const role = new Role(this.scope, this.getName(name, 'Role'), {
+            assumedBy:principal,
+            roleName:this.getUniqueName(name)
+        });
+        role.addManagedPolicy(ManagedPolicy.fromManagedPolicyArn(this.scope, this.getUniqueName(name,'ManagedPolicy'), 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'));
+        return role;
     }
 
     private getCookieList(signedKey:SignedKey): string[] {
