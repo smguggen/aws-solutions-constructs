@@ -20,7 +20,7 @@ import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId} from '@a
 import { Function, Version } from '@aws-cdk/aws-lambda';
 import { CompositePrincipal, Effect, ManagedPolicy, PolicyStatement, Role, ServicePrincipal } from '@aws-cdk/aws-iam';
 import {SignedKeyPair,KeyPairOptions,CookieOptions,SignedKeyPairProps} from './keypair';
-import {format,getName,getUniqueName} from './util';
+import {format,formatCookie,getName,getUniqueName} from './util';
 export interface SecureSiteProps extends StackProps {
     type:SecureSiteType
     signedKeys:(SignedKeyPairProps | string)[] | string
@@ -101,39 +101,55 @@ export class SecureSiteStack extends Stack {
         return this.toString();
     }
 
-    getSignedUrl(signedKey:SignedKeyPair) {
-        this.url.searchParams.append(SignedUrlName.KEY_PAIR_ID, format(signedKey.item.publicKeyId));
-        this.url.searchParams.append(SignedUrlName.SIGNATURE,signedKey.signature);
+    static getSignedUrl(uri:string | URL,signedKey:SignedKeyPair) {
+        const url:URL = uri instanceof URL ? uri : new URL(uri);
+        url.searchParams.append(SignedUrlName.KEY_PAIR_ID, format(signedKey.item.publicKeyId));
+        url.searchParams.append(SignedUrlName.SIGNATURE,signedKey.signature);
         if (signedKey.isCustomPolicy) {
-            this.url.searchParams.append(SignedUrlName.POLICY, format(JSON.stringify(signedKey.policy)));
+            url.searchParams.append(SignedUrlName.POLICY, format(JSON.stringify(signedKey.policy)));
         } else {
-            this.url.searchParams.append(SignedUrlName.EXPIRES, signedKey.expires.toString());
+            url.searchParams.append(SignedUrlName.EXPIRES, signedKey.expires.toString());
         }
-        return this.url.toString();
+        return url.toString();
     }
 
-    getSignedCookies(type:SignedCookieType, signedKey:SignedKeyPair): string | SignedCookieHeaders | SignedCookieEdgeHeaders {
+    static getSignedCookies(type:SignedCookieType, signedKey:SignedKeyPair,options?:CookieOptions): string | SignedCookieHeaders | SignedCookieEdgeHeaders {
         switch(type) {
-            case SignedCookieType.STRING: return this.getSignedCookieString(signedKey);
-            case SignedCookieType.HEADER: return this.getSignedCookieHeaders(signedKey);
-            case SignedCookieType.EDGE_LAMBDA_HEADER: return this.getEdgeLambdaSignedCookieHeaders(signedKey);
+            case SignedCookieType.STRING: return this.getSignedCookieString(signedKey,options);
+            case SignedCookieType.HEADER: return this.getSignedCookieHeaders(signedKey,options);
+            case SignedCookieType.EDGE_LAMBDA_HEADER: return this.getEdgeLambdaSignedCookieHeaders(signedKey,options);
         }
     }
 
-    getSignedCookieString(signedKey:SignedKeyPair):string {
-        return this.getCookieList(signedKey).join('; ');
+    static getSignedCookieString(signedKey:SignedKeyPair, cookieOptions?:CookieOptions):string {
+        const options = {
+            ...signedKey.cookieOptions || {},
+            ...cookieOptions || {}
+        }
+        const res = [
+                formatCookie(SignedCookieName.KEY_PAIR_ID,signedKey.item.publicKeyId,options),
+                formatCookie(SignedCookieName.SIGNATURE,signedKey.signature,options)
+            ];
+            if (signedKey.isCustomPolicy) {
+                res.push(formatCookie(SignedCookieName.POLICY,signedKey.policy,options));
+            } else {
+                res.push(formatCookie(SignedCookieName.EXPIRES,signedKey.expires,options));
+            }
+        return res.join('; ');
     }
 
-    getSignedCookieHeaders(signedKey:SignedKeyPair):SignedCookieHeaders {
-        return this.getCookieList(signedKey).map(cookie => {
+    static getSignedCookieHeaders(signedKey:SignedKeyPair, options?:CookieOptions):SignedCookieHeaders {
+        return SecureSiteStack.getSignedCookieString(signedKey,options).split('; ').map(cookie => {
             return {
                 ['Set-Cookie']: cookie
             }
         });
     }
 
-    getEdgeLambdaSignedCookieHeaders(signedKey:SignedKeyPair):SignedCookieEdgeHeaders {
-        return this.getCookieList(signedKey).reduce((acc,cookie) => {
+    static getEdgeLambdaSignedCookieHeaders(signedKey:SignedKeyPair, options?:CookieOptions):SignedCookieEdgeHeaders {
+
+
+        return SecureSiteStack.getSignedCookieString(signedKey,options).split('; ').reduce((acc,cookie) => {
             acc['set-cookie'].push({
                 key:'Set-Cookie',
                 value: cookie
@@ -178,14 +194,14 @@ export class SecureSiteStack extends Stack {
             if (!signedKey) return callback(null,response);
             if ($this.props.type === SecureSiteType.SIGNED_URL) {
                 response.status = 302;
-                const value = $this.getSignedUrl(signedKey);
+                const value = SecureSiteStack.getSignedUrl(this.url, signedKey);
                 const headers = response.headers;
                 headers.location = [{
                     key: 'Location',
                     value
                 }]
             } else {
-                const cookies = $this.getEdgeLambdaSignedCookieHeaders(signedKey);
+                const cookies = SecureSiteStack.getEdgeLambdaSignedCookieHeaders(signedKey, $this.props.defaultCookieOptions);
                 const headers = response.headers;
                 if (!headers['set-cookie']) headers['set-cookie'] = [];
                 headers['set-cookie'] = headers['set-cookie'].concat(cookies['set-cookie']);
@@ -253,22 +269,6 @@ export class SecureSiteStack extends Stack {
             functionVersion:vs
         }
     }
-    private getCookieList(signedKey:SignedKeyPair): string[] {
-        const options = {
-            ...(this.props.defaultCookieOptions || {}),
-            ...(signedKey.cookieOptions || {})
-        }
-        const res = [
-            this.formatCookie(SignedCookieName.KEY_PAIR_ID,signedKey.item.publicKeyId,options),
-            this.formatCookie(SignedCookieName.SIGNATURE,signedKey.signature,options)
-        ];
-        if (signedKey.isCustomPolicy) {
-            res.push(this.formatCookie(SignedCookieName.POLICY,signedKey.policy,options));
-        } else {
-            res.push(this.formatCookie(SignedCookieName.EXPIRES,signedKey.expires,options));
-        }
-        return res;
-    }
 
     private createPublicKey(
         key:string, 
@@ -305,76 +305,5 @@ export class SecureSiteStack extends Stack {
     private getPublicKey(keyId:string, path:string): IPublicKey {
         const publicNm = getName(this.id, 'PublicKey', path.substring(1) || '');
         return PublicKey.fromPublicKeyId(this.scope, publicNm, keyId);
-    }
-
-
-    private formatCookie($name:SignedCookieName, val:any, options:CookieOptions = {}) {
-        if (val && typeof val === 'object') val = JSON.stringify(val);
-        const opt = {
-          path:'/',
-          secure:true,
-          httpOnly:false,
-          ...options
-        }
-        const regex = /[\;\,\s]/;
-        const msg = 'cannot contain semicolons, colons, or spaces'
-        const value = format(val);
-        let name = $name as string;
-        if (regex.test(name) || regex.test(value)) {
-          throw new Error('Cookie strings ' + msg);
-        }
-        name += '=' + value;
-        
-        if (opt.domain) {
-          if (!regex.test(opt.domain)) {
-            name += '; Domain=' + opt.domain;
-          } else { console.error(`Domain "${opt.domain}" ${msg}`) }
-        }
-        
-        if (opt.path) {
-          if (!regex.test(opt.path)) {
-              name += '; Path=' + opt.path;
-          } else {console.error(`Path ${opt.path} ${msg}`)}
-        }
-        
-        let exp = options.expires || options.maxAge ? this.formatCookieDate(options.expires || options.maxAge as Date | string | number) : null;
-        if (exp) {
-          if (exp.getTime() <= Date.now()) {
-            console.error(`Cookie ${name} is expired`);
-          }
-          if (opt.maxAge) {
-              name += '; Max-Age=' + Math.floor(exp.getTime()/1000);
-          } else {
-              name += '; Expires=' + exp.toUTCString();
-          }
-        }
-        if (opt.sameSite) {
-          const ss = opt.sameSite;
-          name += '; SameSite=';
-          const sameSite = /(strict|lax|none)/i.test(ss) ?
-            (ss.substring(0,1).toUpperCase() + ss.substring(1).toLowerCase()) : 
-            opt.sameSite ? 'Strict' : 'Lax';
-          name += sameSite;
-        }
-        if (opt.httpOnly) name += '; HttpOnly';
-        if (opt.secure) name += '; Secure';
-        
-        return name;
-    }
-
-    private formatCookieDate(exp:Date | number | string):Date {
-        let dt;
-        if (exp instanceof Date) {
-            dt = exp;
-        } else {
-            exp = Number(exp);
-            if (isNaN(exp)) throw new Error('Invalid Cookie Date')
-            if (exp < 946728000000) exp *= 1000;
-            dt = new Date(exp);
-        }
-        if (/invalid date/i.test(dt.toString())) {
-            throw new Error('Invalid Cookie Date');
-        }
-        return dt;
     }
 }
