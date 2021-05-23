@@ -1,5 +1,6 @@
-import {SecureSiteStack,SecureSiteType} from '.';
-export {SecureSiteStack} from '.';
+import {SecureSiteType} from '.';
+import {SignedKeyPair} from './keypair';
+export {SecureSiteType,SignedKeyPair};
 
 export function handler(event,context,callback) {
         const request = event.Records[0].cf.request;
