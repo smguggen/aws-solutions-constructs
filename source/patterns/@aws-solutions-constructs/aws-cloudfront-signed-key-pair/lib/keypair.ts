@@ -1,9 +1,10 @@
-import {createSign, generateKeyPairSync} from 'node:crypto';
-import {Buffer} from 'node:buffer';
-import {format,prefixUrl,store} from './util';
-import { IPublicKey } from '@aws-cdk/aws-cloudfront';
-import { SecureSiteStack } from '.';
+///<reference types="@types/node"/>
 
+import {createSign, generateKeyPairSync} from 'crypto';
+import {Buffer} from 'buffer';
+import { IPublicKey } from '@aws-cdk/aws-cloudfront';
+import {SignedCookies,CookieOptions, SignedCookieType, SignedCookieHeaders, SignedCookieEdgeHeaders} from './signedcookies';
+import {SignedUrl} from './signedurl';
 export interface ISignedKeyPair {
     path:string
     expires:number
@@ -25,6 +26,7 @@ export interface SignedKeyPairProps {
     cookieOptions?:CookieOptions
     hostname?: string
     keyPair?:IKeyPair
+    isCannedPolicy?:boolean
 }
 
 export interface SignedKeyPairTime {
@@ -49,15 +51,6 @@ export interface SignedKeyPairStatement {
 export interface SignedKeyPairPolicy {
     Statement: SignedKeyPairStatement[]
 }
-export interface CookieOptions {
-    expires?:Date | number | string
-    maxAge?:Date | number | string
-    secure?:boolean
-    httpOnly?:boolean
-    domain?:string
-    path?:string
-    sameSite?: 'strict' | 'lax' | 'none'
-}
 
 export interface KeyPairOptions {
     type?: 'rsa' | 'dsa' | 'ec' | 'ed25519' | 'ed448' | 'x25519' | 'x448' | 'dh'
@@ -70,14 +63,13 @@ export interface KeyPairOptions {
 }
 
 export class SignedKeyPair implements ISignedKeyPair{
-    prefix:string
     public path = this.props.path
     public readonly publicKey:string
     public item?:IPublicKey
     public ipAddress?:string
     public cookieOptions?:CookieOptions = this.props.cookieOptions
     public url:URL;
-
+    public readonly isCannedPolicy = this.props.isCannedPolicy ? true : false
     private privateKey:string
     private $expires:Date|number|string
     private $starts:Date|number|string
@@ -87,7 +79,6 @@ export class SignedKeyPair implements ISignedKeyPair{
         const keyPair = props.keyPair ? props.keyPair : SignedKeyPair.createKeyPair(props.keyPairOptions);
         this.publicKey = keyPair.publicKey;
         this.privateKey = keyPair.privateKey
-        this.prefix = SignedKeyPair.sanitize(this.props.path);
 
         if (this.props.path.indexOf('/*') > -1) {
             this.hasWildcard = true;
@@ -98,11 +89,11 @@ export class SignedKeyPair implements ISignedKeyPair{
     }
 
     get policy():SignedKeyPairPolicy {
-        return this.getPolicy(this.getUrl(), this.expires,this.starts,this.props.ipAddress);
+        return SignedKeyPair.getPolicy(this.getUrl(),this.expires,this.starts,this.props.ipAddress);
     }
 
     get signature(): string {
-        return this.getSignature(this.policy, this.privateKey);
+        return SignedKeyPair.getSignature(this.policy, this.privateKey);
     }
 
     get expires():number {
@@ -113,16 +104,6 @@ export class SignedKeyPair implements ISignedKeyPair{
     get starts():number {
         if (!this.$starts) this.$starts = this.props.starts;
         return this.getExpires(this.$starts);
-    }
-
-    setExpiration(time:Date|number|string):this {
-        this.$expires = time;
-        return this;
-    }
-
-    setStart(time:Date|number|string):this {
-        this.$starts = time;
-        return this;
     }
 
     static createKeyPair(options:KeyPairOptions = {}):IKeyPair {
@@ -160,94 +141,26 @@ export class SignedKeyPair implements ISignedKeyPair{
         return res as unknown as IKeyPair;
     }
 
-    getSignature($policy:SignedKeyPairPolicy, privateKey:string):string {
-        const policy = JSON.stringify($policy);
-        const sign = createSign('sha256')
-        sign.update(policy);
-        sign.end();
-        const SignedKeyPair = sign.sign(privateKey);
-        const st = Buffer.from(SignedKeyPair as any, 'utf8' as any);
-        const sig = st.toString('base64');
-        return format(sig);
-    }
-
-
-    getPolicy(
-        url:string,
-        starts:number,
-        expires:number,
-        ipAddress?:string
-    ): SignedKeyPairPolicy {
-        
-        const policy:any = {
-            Statement: [
-                {
-                    Resource: prefixUrl(url),
-                    Condition: {
-                        DateLessThan: {
-                            "AWS:EpochTime": expires
-                        },
-                        DateGreaterThan: {
-                            "AWS:EpochTime": starts
-                        },
-                    }
-                }
-            ]
-        }
-        
-        if (ipAddress) {
-            this.ipAddress = ipAddress;
-            policy.Statement[0].Condition.IpAddress['AWS:SourceIp'] = ipAddress; 
-        }
-        return policy;
-    }
-
-    static sanitize(name:string):string {
-        return name
-            .replace('*', '_STAR_')
-            .replace('/', '_SLASH_')
-            .replace(/[^a-zA-Z0-9\_\.\-]/, '.');
-    }
-
-    static normalize(name:string):string {
-        name = name
-        .replace('_STAR_', '.*')
-        .replace('_SLASH_', '/')
-        .replace(/^\//, '/?');
-
-        return name.startsWith('/') ? name : '/?' + name;
-    }
-
-    static isPath(id:string, path:string):boolean {
-        const normalized = SignedKeyPair.normalize(id);
-        const reg = new RegExp(normalized, 'g');
-        return reg.test(path);
-    }
-
-    storeKeyPair(scope:SecureSiteStack, name:string = ''):this {
-        store(scope, `${this.prefix}_SignedKeyPairPublicKey`, this.publicKey, scope.principal, false, name);
-        store(scope, `${this.prefix}_SignedKeyPairPrivateKey`, this.privateKey, scope.principal, false, name);
-        return this;
-    }
-
-    getEpochTime(time?:Date | number | string, def?:Date | number | string, useSeconds:boolean = false): number {
-
-        const $this = this;
+    static getEpochTime(
+        time?:Date | number | string, 
+        def?:Date | number | string, 
+        useSeconds:boolean = false
+    ): number {
         try {
-            def = $this.timeToNumberInMilliseconds(def)
+            def = SignedKeyPair.timeToNumberInMilliseconds(def)
         } catch(e) {
             def = (new Date()).getTime();
         }
         let res;
         try {
-            res = $this.timeToNumberInMilliseconds(time);
+            res = SignedKeyPair.timeToNumberInMilliseconds(time);
         } catch(e) {
             res = def;
         }
         return useSeconds ? Math.round(res/1000) : res;
     }
 
-    timeToNumberInMilliseconds(time?:Date | number | string):number {
+    static timeToNumberInMilliseconds(time?:Date | number | string):number {
         let dt;
         if (time instanceof Date) {
             dt = time;
@@ -263,15 +176,76 @@ export class SignedKeyPair implements ISignedKeyPair{
         return Math.round(dt.getTime());
     }
 
+    static getSignature($policy:SignedKeyPairPolicy, privateKey:string):string {
+        const policy = JSON.stringify($policy);
+        const sign = createSign('sha256')
+        sign.update(policy);
+        sign.end();
+        const SignedKeyPair = sign.sign(privateKey);
+        const st = Buffer.from(SignedKeyPair as any, 'utf8' as any);
+        const sig = st.toString('base64');
+        return encodeURIComponent(sig)
+            .replace('+', '-')
+            .replace('=', '_')
+            .replace('/', '~');
+    }
+
+
+    static getPolicy(
+        url:string,
+        expires:number,
+        starts?:number,
+        ipAddress?:string
+    ): SignedKeyPairPolicy {
+        
+        const policy:any = {
+            Statement: [
+                {
+                    Resource: 'https://' + String(url).replace(/https?\:\/\//, ''),
+                    Condition: {
+                        DateLessThan: {
+                            "AWS:EpochTime": expires
+                        }
+                    }
+                }
+            ]
+        }
+        if (starts) {
+            policy.Statement[0].Condition.DateGreaterThan['AWS:EpochTime'] = starts;
+        }
+        if (ipAddress) {
+            policy.Statement[0].Condition.IpAddress['AWS:SourceIp'] = ipAddress; 
+        }
+        return policy;
+    }
+
+    getSignedUrl(url:string | URL):string {
+        return SignedUrl.get(url, this);
+    }
+    
+    getSignedCookies(type:SignedCookieType, options:CookieOptions = {}): string | SignedCookieHeaders | SignedCookieEdgeHeaders {
+        return SignedCookies.get(type,this,{...options,...this.props.cookieOptions});
+    }
+
     setItem(item:IPublicKey):void {
         this.item = item;
     }
     protected getExpires(expires:Date | number | string):number {
-        return this.getEpochTime(expires, Date.now() + (60*60*24*7*1000), true);
+        return SignedKeyPair.getEpochTime(expires, Date.now() + (60*60*24*7*1000), true);
     }
 
     protected getStart(starts:Date|number|string):number {
-        return this.getEpochTime(starts, Date.now(), true);
+        return SignedKeyPair.getEpochTime(starts, Date.now(), true);
+    }
+
+    protected setExpiration(time:Date|number|string):this {
+        this.$expires = time;
+        return this;
+    }
+
+    protected setStart(time:Date|number|string):this {
+        this.$starts = time;
+        return this;
     }
 
     private getUrl() {

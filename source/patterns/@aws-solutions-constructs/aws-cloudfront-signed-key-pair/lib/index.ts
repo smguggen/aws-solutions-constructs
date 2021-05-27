@@ -14,16 +14,16 @@
 ///<reference types="@types/node"/>
 
 import {Construct,Stack,RemovalPolicy, StackProps,CfnOutput, Duration} from '@aws-cdk/core';
-import { IPublicKey, PublicKey, Distribution, DistributionProps,  KeyGroup, EdgeLambda, LambdaEdgeEventType, AddBehaviorOptions, IOrigin, OriginAccessIdentity } from '@aws-cdk/aws-cloudfront';
+import { IPublicKey, PublicKey, Distribution, DistributionProps,  KeyGroup, EdgeLambda, LambdaEdgeEventType, IOrigin, OriginAccessIdentity } from '@aws-cdk/aws-cloudfront';
 import {S3Origin} from '@aws-cdk/aws-cloudfront-origins';
 import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId} from '@aws-cdk/custom-resources';
 import {BlockPublicAccess, Bucket, BucketEncryption} from '@aws-cdk/aws-s3'
 import {BucketDeployment, Source} from '@aws-cdk/aws-s3-deployment';
 import { Function, Version } from '@aws-cdk/aws-lambda';
 import { CanonicalUserPrincipal, CompositePrincipal, Effect, ManagedPolicy, PolicyStatement, Role, ServicePrincipal } from '@aws-cdk/aws-iam';
-import {SignedKeyPair,KeyPairOptions,CookieOptions,SignedKeyPairProps} from './keypair';
-import {getName,getUniqueName,store} from './util';
+import {SignedKeyPair,KeyPairOptions,SignedKeyPairProps} from './keypair';
 import path from 'path';
+import {Key} from '@aws-cdk/aws-kms';
 import fs from 'fs'; 
 export interface SecureSiteProps extends StackProps {
     type:SecureSiteType
@@ -34,20 +34,14 @@ export interface SecureSiteProps extends StackProps {
     defaultKeyPairOptions?:KeyPairOptions
 }
 
-export enum SignedCookieName {
-    KEY_PAIR_ID = 'CloudFront-Key-Pair-Id',
-    SIGNATURE = 'CloudFront-Signature',
-    EXPIRES = 'CloudFront-Expires',
-    POLICY = 'CloudFront-Policy'
-}
-
 export enum SecureSiteType {
     SIGNED_COOKIE = 'signedCookies',
     SIGNED_URL = 'signedUrl'
 }
+
 export class SecureSiteStack extends Stack {
     signedKeys: SignedKeyPair[]
-    oai:OriginAccessIdentity = new OriginAccessIdentity(this, getName(this.id,'oai'), {});
+    oai:OriginAccessIdentity = new OriginAccessIdentity(this, this.getName(this.id,'oai'), {});
     principal = new CanonicalUserPrincipal(this.oai.cloudFrontOriginAccessIdentityS3CanonicalUserId)
 
     constructor(
@@ -64,10 +58,9 @@ export class SecureSiteStack extends Stack {
             const pair = new SignedKeyPair(keys);
             pair.setItem(this.createPublicKey(pair.publicKey,pair.path));
             paths.push(pair.path);
-            pair.storeKeyPair(this, id);
             return pair;
         },this);
-        store(this, 'SignedKeyPairPaths',JSON.stringify(paths), this.principal, true, this.id);
+        this.storeParameters('SignedKeyPairPaths',JSON.stringify(paths), true);
     }
 
     applyRemovalPolicy(policy:RemovalPolicy):void {
@@ -79,7 +72,7 @@ export class SecureSiteStack extends Stack {
     }
 
     protected createKeyGroup():KeyGroup {
-        const nm = getName(this.id,'Key-Group');
+        const nm = this.getName(this.id,'Key-Group');
         const items = this.signedKeys.map(signedKey => signedKey.item);
         return new KeyGroup(this,nm, {
             keyGroupName:nm,
@@ -136,7 +129,7 @@ export class SecureSiteStack extends Stack {
             }, 
         }
         
-        return new Distribution(this,getName(this.id,'Distribution'), {
+        return new Distribution(this,this.getName(this.id,'Distribution'), {
             ...(this.props.cloudFrontDistributionProps || {}),
             defaultBehavior,
             additionalBehaviors
@@ -144,7 +137,7 @@ export class SecureSiteStack extends Stack {
     }
 
     protected createOrigin(content:string, key:string = '/'):IOrigin {
-        const bucket = new Bucket(this,getName(this.id, content, 'Bucket'), {
+        const bucket = new Bucket(this,this.getName(this.id, content, 'Bucket'), {
             encryption:BucketEncryption.S3_MANAGED,
             blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
             versioned:true,
@@ -154,17 +147,11 @@ export class SecureSiteStack extends Stack {
             ]
 
         });
-        new BucketDeployment(this, getName(this.id,content,'ContentDeployment'), {
+        new BucketDeployment(this, this.getName(this.id,content,'ContentDeployment'), {
             sources:[Source.asset(content)],
             destinationBucket:bucket,
             destinationKeyPrefix:key
         });
-
-        /*new BucketDeployment(this, getName(this.id,content,'OriginDeployment'), {
-            sources:[Source.asset(path.join(__dirname, './origin'))],
-            destinationBucket:bucket,
-            destinationKeyPrefix:'/origin'
-        });*/
 
         const statement = new PolicyStatement({
             actions:['s3:ListBucket', 's3:GetBucket', 's3:GetObject'],
@@ -188,17 +175,17 @@ export class SecureSiteStack extends Stack {
             actions:['sts:assumeRole']
         });
         principal.addToPolicy(statement);
-        const role = new Role(this, getName(name, 'Role'), {
+        const role = new Role(this, this.getName(name, 'Role'), {
             assumedBy:principal,
-            roleName:getUniqueName(name)
+            roleName:this.getUniqueName(name)
         });
-        role.addManagedPolicy(ManagedPolicy.fromManagedPolicyArn(this, getUniqueName(name,'ManagedPolicy'), 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'));
+        role.addManagedPolicy(ManagedPolicy.fromManagedPolicyArn(this, this.getUniqueName(name,'ManagedPolicy'), 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'));
         return role;
     }
 
 
     protected getEdgeLambda():EdgeLambda {
-        const publicNm = getName(this.id, 'LambdaFunction');
+        const publicNm = this.getName(this.id, 'LambdaFunction');
         const Role = this.makeLambdaRole(publicNm);
         const policy = AwsCustomResourcePolicy.fromSdkCalls({resources:AwsCustomResourcePolicy.ANY_RESOURCE});
         const resourceOptions = {policy, installLatestAwsSdk:true}
@@ -212,7 +199,7 @@ export class SecureSiteStack extends Stack {
             FunctionName:publicNm,
             Publish:true
         }
-        const cr = new AwsCustomResource(this,getName(publicNm, 'Resource'),{
+        const cr = new AwsCustomResource(this,this.getName(publicNm, 'Resource'),{
             ...resourceOptions,
             onCreate: {
                 ...eventOptions,
@@ -240,8 +227,8 @@ export class SecureSiteStack extends Stack {
                 }
             }
         });
-        const fn = Function.fromFunctionArn(this, getName(publicNm,'Function'), cr.getResponseField('FunctionArn'));
-        const vs = new Version(this,getName(publicNm,'Version'), {
+        const fn = Function.fromFunctionArn(this, this.getName(publicNm,'Function'), cr.getResponseField('FunctionArn'));
+        const vs = new Version(this,this.getName(publicNm,'Version'), {
             lambda:fn
         });
         return {
@@ -256,22 +243,22 @@ export class SecureSiteStack extends Stack {
         keyPairName?:string,
         comment?:string
     ): IPublicKey {
-        const publicNm = getName(this.id, 'PublicKey', path.substring(1) || '');
-        const pkName = getUniqueName(publicNm);
+        const publicNm = this.getName(this.id, 'PublicKey', path.substring(1) || '');
+        const pkName = this.getUniqueName(publicNm);
         const policy = AwsCustomResourcePolicy.fromSdkCalls({resources:AwsCustomResourcePolicy.ANY_RESOURCE});
         const resourceOptions = {policy, installLatestAwsSdk:true}
         const eventOptions = {
             service:'CloudFront',
             physicalResourceId:PhysicalResourceId.fromResponse('PublicKey.Id')
         }
-        const cr = new AwsCustomResource(this,getName(keyPairName || publicNm, 'Resource'),{
+        const cr = new AwsCustomResource(this,this.getName(keyPairName || publicNm, 'Resource'),{
             ...resourceOptions,
             onUpdate: {
                 ...eventOptions,
                 action:'createPublicKey',
                 parameters:{
                     PublicKeyConfig: {
-                        CallerReference: getUniqueName(pkName),
+                        CallerReference: this.getUniqueName(pkName),
                         Name:keyPairName || publicNm,
                         EncodedKey:key,
                         Comment:comment,
@@ -283,7 +270,67 @@ export class SecureSiteStack extends Stack {
     } 
 
     private getPublicKey(keyId:string, path:string): IPublicKey {
-        const publicNm = getName(this.id, 'PublicKey', path.substring(1) || '');
+        const publicNm = this.getName(this.id, 'PublicKey', path.substring(1) || '');
         return PublicKey.fromPublicKeyId(this, publicNm, keyId);
+    }
+
+    private storeParameters(
+        key:string,
+        value:string, 
+        output?: boolean
+    ) {
+        const publicNm = this.getName(this.id, key, 'PathParams');
+        const policy = AwsCustomResourcePolicy.fromSdkCalls({resources:AwsCustomResourcePolicy.ANY_RESOURCE});
+        const encryptionKey = new Key(this,this.getName(publicNm,'EncryptionKey'), {
+            enableKeyRotation:true,
+            admins:[this.principal]
+        })
+        const resourceOptions = {policy, installLatestAwsSdk:true}
+        const eventOptions = {
+            service:'SSM',
+            region:'us-east-1'
+        }
+        const parameters = {
+            Name: key,
+      
+        }
+        new AwsCustomResource(this,publicNm,{
+            ...resourceOptions,
+            onUpdate: {
+                ...eventOptions,
+                action:'putParameter',
+                physicalResourceId:PhysicalResourceId.of(this.getUniqueName(key)),
+                parameters: {
+                    ...parameters,
+                    Value: value,
+                    Overwrite:true,
+                    Type:'SecureString',
+                    KeyId: encryptionKey.keyId
+                }
+            },
+            onDelete: {
+                ...eventOptions,
+                physicalResourceId:PhysicalResourceId.of(this.getUniqueName(key)),
+                action:'deleteParameter',
+                parameters
+            }
+        });
+      
+        if (output) {
+            new CfnOutput(this,`${key}Output`, {
+                exportName:key,
+                value
+            })
+        }
+      }
+
+    private getName(...names: string[]): string {
+        return `${names.join('-')}`
+    }
+    
+    private getUniqueName(...names: string[]): string {
+        const differentiator = Math.random().toString(36).substring(7);
+        names.push(differentiator);
+        return this.getName(...names);
     }
 }
