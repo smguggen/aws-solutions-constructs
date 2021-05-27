@@ -1,7 +1,8 @@
 import {createSign, generateKeyPairSync} from 'node:crypto';
 import {Buffer} from 'node:buffer';
-import {format,prefixUrl} from './util';
+import {format,prefixUrl,store} from './util';
 import { IPublicKey } from '@aws-cdk/aws-cloudfront';
+import { SecureSiteStack } from '.';
 
 export interface ISignedKeyPair {
     path:string
@@ -9,13 +10,11 @@ export interface ISignedKeyPair {
     readonly publicKey:string
     policy:SignedKeyPairPolicy
     signature:string
-    starts?:number
+    starts:number
     ipAddress?:string
-    isCustomPolicy?:boolean
     cookieOptions?:CookieOptions
     item?:IPublicKey
 }
-
 
 export interface SignedKeyPairProps {
     path:string
@@ -25,6 +24,7 @@ export interface SignedKeyPairProps {
     keyPairOptions?:KeyPairOptions
     cookieOptions?:CookieOptions
     hostname?: string
+    keyPair?:IKeyPair
 }
 
 export interface SignedKeyPairTime {
@@ -70,25 +70,59 @@ export interface KeyPairOptions {
 }
 
 export class SignedKeyPair implements ISignedKeyPair{
+    prefix:string
     public path = this.props.path
     public readonly publicKey:string
-    public expires:number = this.getExpires(this.props.expires)
-    public policy:SignedKeyPairPolicy
-    public signature:string
-    public isCustomPolicy:boolean
     public item?:IPublicKey
-    public starts?:number
     public ipAddress?:string
     public cookieOptions?:CookieOptions = this.props.cookieOptions
-    
-    private url = new URL(this.props.path, this.props.hostname || '');
+    public url:URL;
+
+    private privateKey:string
+    private $expires:Date|number|string
+    private $starts:Date|number|string
+    private hasWildcard:boolean = false;
+    private pathWithWildcard?:string
     constructor(private props:SignedKeyPairProps) {
-        const keyPair = SignedKeyPair.createKeyPair(props.keyPairOptions);
+        const keyPair = props.keyPair ? props.keyPair : SignedKeyPair.createKeyPair(props.keyPairOptions);
         this.publicKey = keyPair.publicKey;
-        const starts = this.props.starts ? this.getExpires(this.props.starts) : undefined
-        this.policy = this.getPolicy(this.url.toString(),this.expires,starts,props.ipAddress);
-        this.signature = this.getSignature(this.policy, keyPair.privateKey);
-        this.isCustomPolicy = props.starts || props.ipAddress ? true : false;
+        this.privateKey = keyPair.privateKey
+        this.prefix = SignedKeyPair.sanitize(this.props.path);
+
+        if (this.props.path.indexOf('/*') > -1) {
+            this.hasWildcard = true;
+            this.pathWithWildcard = this.props.path;
+            this.props.path = this.props.path.replace('/*', '/');
+        }
+        this.url = new URL(this.props.path, this.props.hostname || '');
+    }
+
+    get policy():SignedKeyPairPolicy {
+        return this.getPolicy(this.getUrl(), this.expires,this.starts,this.props.ipAddress);
+    }
+
+    get signature(): string {
+        return this.getSignature(this.policy, this.privateKey);
+    }
+
+    get expires():number {
+        if (!this.$expires) this.$expires = this.props.expires;
+        return this.getExpires(this.$expires);
+    }
+
+    get starts():number {
+        if (!this.$starts) this.$starts = this.props.starts;
+        return this.getExpires(this.$starts);
+    }
+
+    setExpiration(time:Date|number|string):this {
+        this.$expires = time;
+        return this;
+    }
+
+    setStart(time:Date|number|string):this {
+        this.$starts = time;
+        return this;
     }
 
     static createKeyPair(options:KeyPairOptions = {}):IKeyPair {
@@ -140,10 +174,11 @@ export class SignedKeyPair implements ISignedKeyPair{
 
     getPolicy(
         url:string,
+        starts:number,
         expires:number,
-        starts?:number,
         ipAddress?:string
     ): SignedKeyPairPolicy {
+        
         const policy:any = {
             Statement: [
                 {
@@ -151,16 +186,15 @@ export class SignedKeyPair implements ISignedKeyPair{
                     Condition: {
                         DateLessThan: {
                             "AWS:EpochTime": expires
-                        }
+                        },
+                        DateGreaterThan: {
+                            "AWS:EpochTime": starts
+                        },
                     }
                 }
             ]
         }
-        this.isCustomPolicy = starts || ipAddress ? true : false;
-        if (starts) {
-            this.starts = starts;
-            policy.Statement[0].Condition.DateGreaterThan['AWS:EpochTime'] = starts;
-        }
+        
         if (ipAddress) {
             this.ipAddress = ipAddress;
             policy.Statement[0].Condition.IpAddress['AWS:SourceIp'] = ipAddress; 
@@ -168,12 +202,32 @@ export class SignedKeyPair implements ISignedKeyPair{
         return policy;
     }
 
-    getExpires(expires:Date | number | string):number {
-        return this.getEpochTime(expires, Date.now() + (60*60*24*7*1000), true);
+    static sanitize(name:string):string {
+        return name
+            .replace('*', '_STAR_')
+            .replace('/', '_SLASH_')
+            .replace(/[^a-zA-Z0-9\_\.\-]/, '.');
     }
 
-    getStart(starts:Date|number|string):number {
-        return this.getEpochTime(starts, Date.now(), true);
+    static normalize(name:string):string {
+        name = name
+        .replace('_STAR_', '.*')
+        .replace('_SLASH_', '/')
+        .replace(/^\//, '/?');
+
+        return name.startsWith('/') ? name : '/?' + name;
+    }
+
+    static isPath(id:string, path:string):boolean {
+        const normalized = SignedKeyPair.normalize(id);
+        const reg = new RegExp(normalized, 'g');
+        return reg.test(path);
+    }
+
+    storeKeyPair(scope:SecureSiteStack, name:string = ''):this {
+        store(scope, `${this.prefix}_SignedKeyPairPublicKey`, this.publicKey, scope.principal, false, name);
+        store(scope, `${this.prefix}_SignedKeyPairPrivateKey`, this.privateKey, scope.principal, false, name);
+        return this;
     }
 
     getEpochTime(time?:Date | number | string, def?:Date | number | string, useSeconds:boolean = false): number {
@@ -211,6 +265,21 @@ export class SignedKeyPair implements ISignedKeyPair{
 
     setItem(item:IPublicKey):void {
         this.item = item;
+    }
+    protected getExpires(expires:Date | number | string):number {
+        return this.getEpochTime(expires, Date.now() + (60*60*24*7*1000), true);
+    }
+
+    protected getStart(starts:Date|number|string):number {
+        return this.getEpochTime(starts, Date.now(), true);
+    }
+
+    private getUrl() {
+        if (this.hasWildcard) {
+            const url = this.url.toString();
+            return url.replace(this.props.path, this.pathWithWildcard);
+        }
+        return this.url.toString();
     }
 
 }

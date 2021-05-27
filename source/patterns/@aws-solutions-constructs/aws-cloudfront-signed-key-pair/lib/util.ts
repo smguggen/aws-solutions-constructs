@@ -1,5 +1,9 @@
+import {Construct,CfnOutput} from '@aws-cdk/core';
+import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId} from '@aws-cdk/custom-resources';
+import {Key} from '@aws-cdk/aws-kms';
 import {CookieOptions} from './keypair';
 import {SignedCookieName} from '.';
+import { IPrincipal } from '@aws-cdk/aws-iam';
 
 export function getName(...names: string[]): string {
     return `${names.join('-')}`
@@ -89,4 +93,57 @@ export function formatCookie($name:SignedCookieName, val:any, options:CookieOpti
     if (opt.secure) name += '; Secure';
     
     return name;
+}
+
+export function store(
+  scope:Construct,
+  key:string,
+  value:string, 
+  principal?:IPrincipal,
+  output?: boolean,
+  name:string = ''
+) {
+  const publicNm = getName(name, key, 'PathParams');
+  const policy = AwsCustomResourcePolicy.fromSdkCalls({resources:AwsCustomResourcePolicy.ANY_RESOURCE});
+  const encryptionKey = new Key(scope,getName(publicNm,'EncryptionKey'), {
+      enableKeyRotation:true,
+      admins:principal ? [principal] : undefined
+  })
+  const resourceOptions = {policy, installLatestAwsSdk:true}
+  const eventOptions = {
+      service:'SSM',
+      region:'us-east-1'
+  }
+  const parameters = {
+      Name: key,
+
+  }
+  new AwsCustomResource(scope,publicNm,{
+      ...resourceOptions,
+      onUpdate: {
+          ...eventOptions,
+          action:'putParameter',
+          physicalResourceId:PhysicalResourceId.of(getUniqueName(key)),
+          parameters: {
+              ...parameters,
+              Value: value,
+              Overwrite:true,
+              Type:'SecureString',
+              KeyId: encryptionKey.keyId
+          }
+      },
+      onDelete: {
+          ...eventOptions,
+          physicalResourceId:PhysicalResourceId.of(getUniqueName(key)),
+          action:'deleteParameter',
+          parameters
+      }
+  });
+
+  if (output) {
+      new CfnOutput(scope,`${key}Output`, {
+          exportName:key,
+          value
+      })
+  }
 }
