@@ -2,31 +2,26 @@
 
 import {createSign, generateKeyPairSync} from 'crypto';
 import {Buffer} from 'buffer';
-import { IPublicKey } from '@aws-cdk/aws-cloudfront';
-import {SignedCookies,CookieOptions, SignedCookieType, SignedCookieHeaders, SignedCookieEdgeHeaders} from './signedcookies';
-import {SignedUrl} from './signedurl';
+import { IPublicKey, PublicKey } from '@aws-cdk/aws-cloudfront';
+import { Construct } from '@aws-cdk/core';
+import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId} from '@aws-cdk/custom-resources';
 export interface ISignedKeyPair {
-    path:string
+    url:URL
     expires:number
-    readonly publicKey:string
-    policy:SignedKeyPairPolicy
-    signature:string
-    starts:number
+    keyPairId:string
+    keyPair:IKeyPair
+    policy?:SignedKeyPairPolicy
+    starts?:number
     ipAddress?:string
-    cookieOptions?:CookieOptions
-    item?:IPublicKey
+    publicKey?:IPublicKey
 }
 
 export interface SignedKeyPairProps {
-    path:string
+    url:string
     expires?:Date|number|string
     starts?:Date|number|string
     ipAddress?:string
     keyPairOptions?:KeyPairOptions
-    cookieOptions?:CookieOptions
-    hostname?: string
-    keyPair?:IKeyPair
-    isCannedPolicy?:boolean
 }
 
 export interface SignedKeyPairTime {
@@ -62,38 +57,24 @@ export interface KeyPairOptions {
     passphrase?:string
 }
 
-export class SignedKeyPair implements ISignedKeyPair{
-    public path = this.props.path
-    public readonly publicKey:string
-    public item?:IPublicKey
+export class SignedKeyPair extends Construct implements ISignedKeyPair {
+    public keyPair = SignedKeyPair.createKeyPair(this.props.keyPairOptions)
+    public publicKey:IPublicKey = this.createPublicKey(this.keyPair.publicKey)
+    public keyPairId:string = this.publicKey.publicKeyId 
+    public url:URL = new URL(this.props.url)
     public ipAddress?:string
-    public cookieOptions?:CookieOptions = this.props.cookieOptions
-    public url:URL;
-    public readonly isCannedPolicy = this.props.isCannedPolicy ? true : false
-    private privateKey:string
     private $expires:Date|number|string
     private $starts:Date|number|string
-    private hasWildcard:boolean = false;
-    private pathWithWildcard?:string
-    constructor(private props:SignedKeyPairProps) {
-        const keyPair = props.keyPair ? props.keyPair : SignedKeyPair.createKeyPair(props.keyPairOptions);
-        this.publicKey = keyPair.publicKey;
-        this.privateKey = keyPair.privateKey
-
-        if (this.props.path.indexOf('/*') > -1) {
-            this.hasWildcard = true;
-            this.pathWithWildcard = this.props.path;
-            this.props.path = this.props.path.replace('/*', '/');
-        }
-        this.url = new URL(this.props.path, this.props.hostname || '');
+    constructor(
+        private scope:Construct,
+        private id:string,
+        private props:SignedKeyPairProps
+    ) {
+        super(scope,id);
     }
 
     get policy():SignedKeyPairPolicy {
-        return SignedKeyPair.getPolicy(this.getUrl(),this.expires,this.starts,this.props.ipAddress);
-    }
-
-    get signature(): string {
-        return SignedKeyPair.getSignature(this.policy, this.privateKey);
+        return SignedKeyPair.getPolicy(this.url.toString(),this.expires,this.starts,this.props.ipAddress);
     }
 
     get expires():number {
@@ -176,21 +157,6 @@ export class SignedKeyPair implements ISignedKeyPair{
         return Math.round(dt.getTime());
     }
 
-    static getSignature($policy:SignedKeyPairPolicy, privateKey:string):string {
-        const policy = JSON.stringify($policy);
-        const sign = createSign('sha256')
-        sign.update(policy);
-        sign.end();
-        const SignedKeyPair = sign.sign(privateKey);
-        const st = Buffer.from(SignedKeyPair as any, 'utf8' as any);
-        const sig = st.toString('base64');
-        return encodeURIComponent(sig)
-            .replace('+', '-')
-            .replace('=', '_')
-            .replace('/', '~');
-    }
-
-
     static getPolicy(
         url:string,
         expires:number,
@@ -219,17 +185,6 @@ export class SignedKeyPair implements ISignedKeyPair{
         return policy;
     }
 
-    getSignedUrl(url:string | URL):string {
-        return SignedUrl.get(url, this);
-    }
-    
-    getSignedCookies(type:SignedCookieType, options:CookieOptions = {}): string | SignedCookieHeaders | SignedCookieEdgeHeaders {
-        return SignedCookies.get(type,this,{...options,...this.props.cookieOptions});
-    }
-
-    setItem(item:IPublicKey):void {
-        this.item = item;
-    }
     protected getExpires(expires:Date | number | string):number {
         return SignedKeyPair.getEpochTime(expires, Date.now() + (60*60*24*7*1000), true);
     }
@@ -248,12 +203,48 @@ export class SignedKeyPair implements ISignedKeyPair{
         return this;
     }
 
-    private getUrl() {
-        if (this.hasWildcard) {
-            const url = this.url.toString();
-            return url.replace(this.props.path, this.pathWithWildcard);
+    protected createPublicKey(
+        key:string, 
+        keyPairName?:string,
+        comment?:string
+    ): IPublicKey {
+        const publicNm = this.getName(this.id, 'PublicKey', this.url.toString());
+        const pkName = this.getUniqueName(publicNm);
+        const policy = AwsCustomResourcePolicy.fromSdkCalls({resources:AwsCustomResourcePolicy.ANY_RESOURCE});
+        const resourceOptions = {policy, installLatestAwsSdk:true}
+        const eventOptions = {
+            service:'CloudFront',
+            physicalResourceId:PhysicalResourceId.fromResponse('PublicKey.Id')
         }
-        return this.url.toString();
+        const cr = new AwsCustomResource(this.scope,this.getName(keyPairName || publicNm, 'Resource'),{
+            ...resourceOptions,
+            onUpdate: {
+                ...eventOptions,
+                action:'createPublicKey',
+                parameters:{
+                    PublicKeyConfig: {
+                        CallerReference: this.getUniqueName(pkName),
+                        Name:keyPairName || publicNm,
+                        EncodedKey:key,
+                        Comment:comment,
+                    }
+                }
+            }
+        })
+        return this.getPublicKey(cr.getResponseField('PublicKey.Id'), publicNm);
+    } 
+
+    protected getPublicKey(keyId:string, name:string): IPublicKey {
+        return PublicKey.fromPublicKeyId(this.scope, name, keyId);
     }
 
+    private getName(...names: string[]): string {
+        return `${names.join('-')}`
+    }
+
+    private getUniqueName(...names: string[]): string {
+        const differentiator = Math.random().toString(36).substring(7);
+        names.push(differentiator);
+        return this.getName(...names);
+    }
 }

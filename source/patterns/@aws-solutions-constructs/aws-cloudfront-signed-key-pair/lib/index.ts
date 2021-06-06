@@ -13,293 +13,131 @@
 
 ///<reference types="@types/node"/>
 
+/**
+ *  Copyright 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance
+ *  with the License. A copy of the License is located at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES
+ *  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions
+ *  and limitations under the License.
+ */
+
+///<reference types="@types/node"/>
+
 import {Construct,Stack,RemovalPolicy, StackProps,CfnOutput, Duration} from '@aws-cdk/core';
-import { IPublicKey, PublicKey, Distribution, DistributionProps,  KeyGroup, EdgeLambda, LambdaEdgeEventType, IOrigin, OriginAccessIdentity } from '@aws-cdk/aws-cloudfront';
+import { IPublicKey, PublicKey, Distribution, DistributionProps,  KeyGroup, EdgeLambda, LambdaEdgeEventType, IOrigin, OriginAccessIdentity, BehaviorOptions, AddBehaviorOptions } from '@aws-cdk/aws-cloudfront';
 import {S3Origin} from '@aws-cdk/aws-cloudfront-origins';
 import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId} from '@aws-cdk/custom-resources';
 import {BlockPublicAccess, Bucket, BucketEncryption} from '@aws-cdk/aws-s3'
 import {BucketDeployment, Source} from '@aws-cdk/aws-s3-deployment';
 import { Function, Version } from '@aws-cdk/aws-lambda';
-import { CanonicalUserPrincipal, CompositePrincipal, Effect, ManagedPolicy, PolicyStatement, Role, ServicePrincipal } from '@aws-cdk/aws-iam';
-import {SignedKeyPair,KeyPairOptions,SignedKeyPairProps} from './keypair';
+import { CanonicalUserPrincipal, CompositePrincipal, Effect, IPrincipal, ManagedPolicy, PolicyStatement, Role, ServicePrincipal } from '@aws-cdk/aws-iam';
 import path from 'path';
 import {Key} from '@aws-cdk/aws-kms';
 import fs from 'fs'; 
-export interface SecureSiteProps extends StackProps {
-    type:SecureSiteType
-    signedKeys:(SignedKeyPairProps | string)[] | string
-    loginPath?:string
-    contentPath?:string
-    cloudFrontDistributionProps?: Partial<DistributionProps>
-    defaultKeyPairOptions?:KeyPairOptions
+import {ISecureOrigin,ISecureBehavior,SecureBehavior,OriginSecurityType} from './secureBehavior';
+export interface SecureSiteProps extends DistributionProps {
+    defaultBehavior:ISecureBehavior
+    additionalBehaviors?:ISecureAdditionalBehaviors
 }
 
-export enum SecureSiteType {
-    SIGNED_COOKIE = 'signedCookies',
-    SIGNED_URL = 'signedUrl'
-}
+export interface ISecureAdditionalBehaviors extends Record<string,ISecureBehavior> {}
 
 export class SecureSiteStack extends Stack {
-    signedKeys: SignedKeyPair[]
-    oai:OriginAccessIdentity = new OriginAccessIdentity(this, this.getName(this.id,'oai'), {});
-    principal = new CanonicalUserPrincipal(this.oai.cloudFrontOriginAccessIdentityS3CanonicalUserId)
-
+    protected distribution: Distribution
+    protected principal:IPrincipal
     constructor(
-        scope:Construct,
-        private id:string, 
-        private props: SecureSiteProps
+        protected scope:Construct,
+        protected id:string,
+        protected props:SecureSiteProps
     ) {
         super(scope,id);
-        
-        const paths = [];
-        if (typeof props.signedKeys === 'string') props.signedKeys = [props.signedKeys];
-        this.signedKeys = props.signedKeys.map(key => {
-            const keys = typeof key === 'string' ? {path:key} : key;
-            const pair = new SignedKeyPair(keys);
-            pair.setItem(this.createPublicKey(pair.publicKey,pair.path));
-            paths.push(pair.path);
-            return pair;
-        },this);
-        this.storeParameters('SignedKeyPairPaths',JSON.stringify(paths), true);
+        this.secureOrigins = this.getSecureOrigins(props.defaultBehavior.origin,...(Object.values(props.additionalBehaviors || {}).map(behavior => behavior.origin)));
+        this.distribution = new Distribution(scope,id,props);
     }
 
-    applyRemovalPolicy(policy:RemovalPolicy):void {
-        this.applyRemovalPolicy(policy);
+    addBehavior(
+        pathPattern:string,
+        origin:SecureOrigin,
+        behaviorOptions:AddBehaviorOptions
+    ) {
+        if (origin.hasSecureOrigin(origin)) this.secureOrigins.push(origin);
+        return this.distribution.addBehavior(pathPattern,origin,behaviorOptions);
     }
 
-    toString():string {
-        return this.toString();
+    protected getSecureOrigins(...origins:ISecureOrigin[]):SecureOrigin[] {
+        return origins.reduce((acc,origin) => {
+            if (this.hasSecureOrigin(origin)) {
+                acc.push(origin as SecureOrigin);
+            }
+            return acc;
+        },[]);
     }
 
-    protected createKeyGroup():KeyGroup {
-        const nm = this.getName(this.id,'Key-Group');
-        const items = this.signedKeys.map(signedKey => signedKey.item);
-        return new KeyGroup(this,nm, {
-            keyGroupName:nm,
-            items
+    protected getBucketDeployment(origin:SecureOrigin):BucketDeployment | null {
+        if (!origin.contentPath) return null;
+        const deployment = new BucketDeployment(this.scope, `${origin.bucket.bucketName}SecureOriginDeployment${this.id}`, {
+            sources:[Source.asset(origin.contentPath)],
+            destinationBucket:origin.bucket,
+            destinationKeyPrefix:origin.originPath
         })
-    }
-
-    protected getDistribution():Distribution {
-        let login;
-        let props = this.props.cloudFrontDistributionProps || {}
-        if (this.props.loginPath) {
-            login = this.props.loginPath;
-            if (!fs.existsSync(login)) login = path.join(process.cwd(),login);
-        }
-        let defaultOrigin;
-        if (!props.defaultBehavior?.origin) {
-            if (!login) login = path.join(__dirname, './login');
-            const loginKey = '/' + login.split('/').pop().split('.').shift();
-            defaultOrigin = this.createOrigin(login, loginKey);
-        } else {
-            defaultOrigin = props.defaultBehavior.origin;
-        }
-        const defaultBehavior = {
-            ...(props.defaultBehavior || {}),
-            origin:defaultOrigin,
-            edgeLambdas: [this.getEdgeLambda()]
-        }
-        let content,contentKey, contentOrigin;
-        if (this.props.contentPath) {
-            content = this.props.contentPath;
-            if (!fs.existsSync(content)) content = path.join(process.cwd(),content);
-            if (fs.existsSync(content)) {
-                contentKey = '/' + content.split('/').pop().split('.').shift();
-                contentOrigin = this.createOrigin(content, contentKey);
-            } else {
-                content = undefined;
-            }
-        }
-        if (!content && props.additionalBehaviors) {
-            const keys = Object.keys(props.additionalBehaviors);
-            if (keys.length) {
-                let contentKey = keys.find(keyName => /(home|main|index|src)/.test(keyName));
-                if (!contentKey) contentKey = keys[0];
-                content = props.additionalBehaviors[contentKey];
-                contentOrigin = content.origin;
-            }
-        }
-        if (!content || !contentKey || !contentOrigin) throw new Error('Can\'t find Destination Origin, please add origin to distribution');
-        const additionalBehaviors = {            
-            ...(props.additionalBehaviors || {}),
-            [contentKey]: {
-                ...((props.additionalBehaviors || {})[contentKey] || {}),
-                origin:contentOrigin
-            }, 
-        }
-        
-        return new Distribution(this,this.getName(this.id,'Distribution'), {
-            ...(this.props.cloudFrontDistributionProps || {}),
-            defaultBehavior,
-            additionalBehaviors
-        });
-    }
-
-    protected createOrigin(content:string, key:string = '/'):IOrigin {
-        const bucket = new Bucket(this,this.getName(this.id, content, 'Bucket'), {
-            encryption:BucketEncryption.S3_MANAGED,
-            blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
-            versioned:true,
-            lifecycleRules: [
-                { abortIncompleteMultipartUploadAfter: Duration.days(2) },
-                { noncurrentVersionExpiration: Duration.days(10) }
-            ]
-
-        });
-        new BucketDeployment(this, this.getName(this.id,content,'ContentDeployment'), {
-            sources:[Source.asset(content)],
-            destinationBucket:bucket,
-            destinationKeyPrefix:key
-        });
-
         const statement = new PolicyStatement({
             actions:['s3:ListBucket', 's3:GetBucket', 's3:GetObject'],
-            resources:[bucket.bucketArn, bucket.arnForObjects('*')],
+            resources:[origin.bucket.bucketArn, origin.bucket.arnForObjects(origin.originPath)],
             principals: [this.principal]
         });
-        bucket.addToResourcePolicy(statement);
-        return new S3Origin(bucket, {
-            originAccessIdentity:this.oai,
-            originPath:key
-        });
+        this.bucket.addToResourcePolicy(statement);
+        return deployment;        
     }
 
-    protected makeLambdaRole(name:string) {
-        const principal = new CompositePrincipal(
-            new ServicePrincipal('lambda.amazonaws.com'),
-            new ServicePrincipal('edgelambda.amazonaws.com')
-        );
-        const statement = new PolicyStatement({
-            effect:Effect.ALLOW,
-            actions:['sts:assumeRole']
-        });
-        principal.addToPolicy(statement);
-        const role = new Role(this, this.getName(name, 'Role'), {
-            assumedBy:principal,
-            roleName:this.getUniqueName(name)
-        });
-        role.addManagedPolicy(ManagedPolicy.fromManagedPolicyArn(this, this.getUniqueName(name,'ManagedPolicy'), 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'));
-        return role;
+    protected encodeParameterKey(str:string):string {
+        if (/![^a-z0-9\-\.\_\s]/ig.test(str) && !/^(aws|ssm)/.test(str)) return str;
+        const encodedStr = encodeURIComponent(str)
+        const newStr = encodedStr
+            .replace('*', '_STAR_')
+            .replace('%', '_PER_')
+            .replace(/^(aws|ssm)/i, (match:any,p1:any) => `PREFIX_${p1}_`);
+
+        if (/[^a-z0-9\-\.\_]/i.test(newStr)) throw new Error(`Parameter key ${str} (encoded as ${newStr}) has invalid characters`);
+        return newStr;
     }
 
-
-    protected getEdgeLambda():EdgeLambda {
-        const publicNm = this.getName(this.id, 'LambdaFunction');
-        const Role = this.makeLambdaRole(publicNm);
-        const policy = AwsCustomResourcePolicy.fromSdkCalls({resources:AwsCustomResourcePolicy.ANY_RESOURCE});
-        const resourceOptions = {policy, installLatestAwsSdk:true}
-        const eventOptions = {
-            service:'Lambda',
-            physicalResourceId:PhysicalResourceId.fromResponse('FunctionArn'),
-            region:'us-east-1'
-        }
-        const Code = fs.readFileSync(path.join(__dirname,'./lambda/index.js'));
-        const parameters = {
-            FunctionName:publicNm,
-            Publish:true
-        }
-        const cr = new AwsCustomResource(this,this.getName(publicNm, 'Resource'),{
-            ...resourceOptions,
-            onCreate: {
-                ...eventOptions,
-                action:'createFunction',
-                parameters: {
-                    ...parameters,
-                    Handler: `index.${this.props.type as string}`,
-                    Code,
-                    Role
-                }
-            },
-            onUpdate: {
-                ...eventOptions,
-                action:'updateFunctionCode',
-                parameters: {
-                    ...parameters,
-                    ZipFile:Code
-                }
-            },
-            onDelete: {
-                ...eventOptions,
-                action:'deleteFunction',
-                parameters: {
-                    FunctionName:publicNm
-                }
-            }
-        });
-        const fn = Function.fromFunctionArn(this, this.getName(publicNm,'Function'), cr.getResponseField('FunctionArn'));
-        const vs = new Version(this,this.getName(publicNm,'Version'), {
-            lambda:fn
-        });
-        return {
-            eventType:LambdaEdgeEventType.VIEWER_REQUEST,
-            functionVersion:vs
-        }
+    protected decodeParameterKey(str:string):string {
+        const newStr = str
+            .replace('_STAR_', '*')
+            .replace('_PER_', '%')
+            .replace(/^PREFIX\_(aws|ssm)\_/i, (match:any,p1:any) => p1);
+        return decodeURIComponent(newStr);
     }
-
-    private createPublicKey(
-        key:string, 
-        path, 
-        keyPairName?:string,
-        comment?:string
-    ): IPublicKey {
-        const publicNm = this.getName(this.id, 'PublicKey', path.substring(1) || '');
-        const pkName = this.getUniqueName(publicNm);
-        const policy = AwsCustomResourcePolicy.fromSdkCalls({resources:AwsCustomResourcePolicy.ANY_RESOURCE});
-        const resourceOptions = {policy, installLatestAwsSdk:true}
-        const eventOptions = {
-            service:'CloudFront',
-            physicalResourceId:PhysicalResourceId.fromResponse('PublicKey.Id')
-        }
-        const cr = new AwsCustomResource(this,this.getName(keyPairName || publicNm, 'Resource'),{
-            ...resourceOptions,
-            onUpdate: {
-                ...eventOptions,
-                action:'createPublicKey',
-                parameters:{
-                    PublicKeyConfig: {
-                        CallerReference: this.getUniqueName(pkName),
-                        Name:keyPairName || publicNm,
-                        EncodedKey:key,
-                        Comment:comment,
-                    }
-                }
-            }
-        })
-        return this.getPublicKey(cr.getResponseField('PublicKey.Id'), path);
-    } 
-
-    private getPublicKey(keyId:string, path:string): IPublicKey {
-        const publicNm = this.getName(this.id, 'PublicKey', path.substring(1) || '');
-        return PublicKey.fromPublicKeyId(this, publicNm, keyId);
-    }
-
-    private storeParameters(
+    storeParameters(
+        principal:IPrincipal,
         key:string,
         value:string, 
         output?: boolean
-    ) {
-        const publicNm = this.getName(this.id, key, 'PathParams');
+    ):this {
+        const name = this.id + key;
+        const Name = this.encodeParameterKey(key);
         const policy = AwsCustomResourcePolicy.fromSdkCalls({resources:AwsCustomResourcePolicy.ANY_RESOURCE});
-        const encryptionKey = new Key(this,this.getName(publicNm,'EncryptionKey'), {
+        const encryptionKey = new Key(this.scope, `${name}EncryptionKey`, {
             enableKeyRotation:true,
-            admins:[this.principal]
+            admins:[principal]
         })
         const resourceOptions = {policy, installLatestAwsSdk:true}
         const eventOptions = {
             service:'SSM',
             region:'us-east-1'
         }
-        const parameters = {
-            Name: key,
-      
-        }
-        new AwsCustomResource(this,publicNm,{
+        const parameters = {Name}
+        new AwsCustomResource(this.scope,name + 'CustomResource',{
             ...resourceOptions,
             onUpdate: {
                 ...eventOptions,
                 action:'putParameter',
-                physicalResourceId:PhysicalResourceId.of(this.getUniqueName(key)),
+                physicalResourceId:PhysicalResourceId.of(name),
                 parameters: {
                     ...parameters,
                     Value: value,
@@ -310,27 +148,18 @@ export class SecureSiteStack extends Stack {
             },
             onDelete: {
                 ...eventOptions,
-                physicalResourceId:PhysicalResourceId.of(this.getUniqueName(key)),
+                physicalResourceId:PhysicalResourceId.of(name),
                 action:'deleteParameter',
                 parameters
             }
         });
       
         if (output) {
-            new CfnOutput(this,`${key}Output`, {
+            new CfnOutput(this.scope,`${name}Output`, {
                 exportName:key,
                 value
             })
         }
-      }
-
-    private getName(...names: string[]): string {
-        return `${names.join('-')}`
-    }
-    
-    private getUniqueName(...names: string[]): string {
-        const differentiator = Math.random().toString(36).substring(7);
-        names.push(differentiator);
-        return this.getName(...names);
+        return this;
     }
 }
