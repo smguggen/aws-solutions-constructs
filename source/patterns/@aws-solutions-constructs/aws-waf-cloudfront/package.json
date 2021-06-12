@@ -1,0 +1,32 @@
+{
+  "name": "aws-cloudfront-waf",
+  "version": "1.0.0",
+  "description": "",
+  "main": "lib/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/awslabs/aws-solutions-constructs.git"
+  },
+  "keywords": [
+    "cloudfront",
+    "serverless",
+    "construct",
+    "waf",
+    "webacl",
+    "acl"
+  ],
+  "author": "sguggenh",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/awslabs/aws-solutions-constructs/issues"
+  },
+  "homepage": "https://github.com/awslabs/aws-solutions-constructs#readme",
+  "dependencies": {
+    "@aws-cdk/aws-cloudfront": "^1.108.1",
+    "@aws-cdk/aws-wafv2": "^1.108.1",
+    "@aws-cdk/core": "^1.108.1"
+  }
+}
