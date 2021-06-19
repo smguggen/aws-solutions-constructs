@@ -11,13 +11,13 @@
  *  and limitations under the License.
  */
 
-import {Construct, CfnTag} from '@aws-cdk/core';
+import {Construct, CfnTag,CfnOutput} from '@aws-cdk/core';
 import {DistributionProps} from '@aws-cdk/aws-cloudfront';
+import {AwsCustomResource,AwsCustomResourcePolicy, PhysicalResourceId} from '@aws-cdk/custom-resources';
 import {CfnWebACL, CfnWebACLProps} from '@aws-cdk/aws-wafv2';
 
 export interface WafToCloudFrontProps {
     distributionProps: DistributionProps
-
     defaultAction?:DefaultAction | CfnWebACL.DefaultActionProperty
     name?:string
     description?:string
@@ -25,27 +25,8 @@ export interface WafToCloudFrontProps {
     cloudWatchMetricsEnabled?:boolean
     sampledRequestsEnabled?:boolean
     tags?: (CfnTag | {[name:string]:any})[]
-}
-
-interface WebACLRuleOptions {
-    priority?:number
-    visibilityConfig?:CfnWebACL.VisibilityConfigProperty
-    labels?:string[]
-}
-
-export interface WebAclRuleGroup extends WebACLRuleOptions {
-    action?: CfnWebACL.OverrideActionProperty
-    statement: RuleGroupStatementProperty
-}
-
-export interface WebAclRule extends WebACLRuleOptions {
-    action?:CfnWebACL.RuleActionProperty
-    statement: Omit<CfnWebACL.StatementProperty, 'managedRuleGroupStatement' | 'ruleGroupReferenceStatement'>
-}
-
-export type RuleGroupStatementProperty = {
-    managedRuleGroupStatement?:CfnWebACL.ManagedRuleGroupStatementProperty 
-    ruleGroupReferenceStatement?:CfnWebACL.RuleGroupReferenceStatementProperty
+    rules?: CfnWebACL.RuleProperty[]
+    includeMinimalRuleConfig?:boolean
 }
 
 export interface CustomResponseBody {
@@ -60,63 +41,90 @@ export enum CustomResponseBodyType {
     Plain = 'TEXT_PLAIN'
 }
 
-export enum RuleAction {
-    Allow = 'allow',
-    Block = 'block',
-    Count = 'count'
-}
-
-export enum OverrideAction {
-    Count = 'count',
-    None = 'none'
-}
-
 export enum DefaultAction {
     Allow = 'allow',
     Block = 'block'
 }
 
-export enum WebACLStatementType {
-    Statement = 'STATEMENT',
-    Action = 'ACTION',
-    Override = 'OVERRIDE',
-    Custom = 'CUSTOM'
-}
-
-export enum CustomStatement {
-    Default = 'DEFAULT',
-    RateBased = 'RATE_BASED',
-}
-
-
 export class WafToCloudFront extends Construct {
     readonly name = this.props.name || this.id
     visibilityConfig = this.getVisibilityConfig(this.name, this.props.cloudWatchMetricsEnabled, this.props.sampledRequestsEnabled)
-
+    rules:CfnWebACL.RuleProperty[] = this.getRules()
     constructor(
         protected scope:Construct, 
         protected id:string,
         protected props:WafToCloudFrontProps
     ) {
         super(scope,id);
-    }
 
-    getRuleAction(action:RuleAction): CfnWebACL.RuleActionProperty {
-        return this.getAction(action) as CfnWebACL.RuleActionProperty;
-    }
 
-    getOverrideAction(action:OverrideAction): CfnWebACL.OverrideActionProperty {
-        return this.getAction(action) as CfnWebACL.OverrideActionProperty;
     }
-
-    getDefaultAction(action:DefaultAction | CfnWebACL.DefaultActionProperty): CfnWebACL.DefaultActionProperty {
-        if (typeof action === 'string') {
-            return this.getAction(action) as CfnWebACL.DefaultActionProperty;
+    getMinimalRuleConfig(
+        action: 'none' | 'count' = 'none',
+        excluded?:(string | CfnWebACL.ExcludedRuleProperty)[],
+        scopeDownStatement?: CfnWebACL.StatementProperty
+    ): CfnWebACL.RuleProperty[] {
+        const props = {
+            visibilityConfig:this.getVisibilityConfig(`${this.name}MinimalRuleConfig`, true,true),
+            overrideAction: {[action]:{}},
         }
-        return action;
+        const excludedRules = excluded ? excluded.map(ex => {
+            if (typeof ex === 'string') {
+                ex = {
+                    name: ex
+                }
+            }
+            return ex;
+        }) : undefined;
+        return [
+            {key: 'adminProtection', value: 'AWSManagedRulesAdminProtectionRuleSet'},
+            {key: 'core', value:'AWSManagedRulesCommonRuleSet'},
+            {key:'knownBadInputs', value:'AWSManagedRulesKnownBadInputsRuleSet'}
+        ].map((name, ind) => {
+            return {
+                ...props,
+                name:name.key,
+                priority:ind,
+                statement: {
+                    managedRuleGroupStatement: {
+                        name:name.value,
+                        vendorName:'AWS',
+                        excludedRules,
+                        scopeDownStatement
+                    }
+                }
+            }
+        });
     }
 
-    protected getWebAclProps(): CfnWebACLProps { 
+    protected getWebACL(): AwsCustomResource {
+        const name = `${this.name}WebACL`;
+        const policy = AwsCustomResourcePolicy.fromSdkCalls({resources:AwsCustomResourcePolicy.ANY_RESOURCE});
+        const resourceOptions = {
+            policy,
+            installLatestAwsSdk:true
+        }
+        const eventOptions = {
+            service:'WAFV2',
+            region:'us-east-1'
+        }
+        const listCr = new AwsCustomResource(this.scope, name, {
+            ...resourceOptions,
+            onUpdate: {
+                ...eventOptions,
+                action:'createWebACL',
+                parameters: {
+                    Scope: 'CLOUDFRONT',
+                    Region: 'us-east-1'
+                }
+            }
+        });
+        const list = listCr.getResponseField('WebACLs');
+        let acl;
+        if (list )
+    }
+
+    protected getWebACLProps(): CfnWebACLProps { 
         const customResponseBodies = this.props.customResponseBodies ? this.getCustomResponseBodies(this.props.customResponseBodies) : undefined;
         const tags = this.props.tags ? this.getTags(this.props.tags) : undefined;
         return {
@@ -127,12 +135,26 @@ export class WafToCloudFront extends Construct {
             customResponseBodies,
             tags,
             description:this.props.description,
-            rules:[]
+            rules:this.rules
         }
     }
 
-    protected getRule():CfnWebACL.RuleProperty {}
+    protected getDefaultAction(action:DefaultAction | CfnWebACL.DefaultActionProperty): CfnWebACL.DefaultActionProperty {
+        if (typeof action === 'string') {
+            return {
+                [action]: {}
+            }
+        }
+        return action;
+    }
 
+    protected getRules():CfnWebACL.RuleProperty[] {
+        let res = [];
+        if (this.props.rules) res = res.concat(this.props.rules);
+        if (this.props.includeMinimalRuleConfig || !res.length) res = res.concat(this.getMinimalRuleConfig());
+
+        return res;
+    }
     protected getVisibilityConfig(
         name:string,
         metricsEnabled?:any, 
@@ -181,14 +203,6 @@ export class WafToCloudFront extends Construct {
         return res;
     }
 
-    protected getManagedStatement(name:string,vendor:string,excluded?:string[]): CfnWebACL.ManagedRuleGroupStatementProperty {
-        return {
-            name,
-            vendorName:vendor, 
-            excludedRules: excluded ? excluded.map(rule => { return {name:rule} }) : undefined
-        }
-    }
-
     private validateCustomResponseBodyContent(body:CustomResponseBody): string {
         const content = body.content;
         let con:string = '';
@@ -223,21 +237,5 @@ export class WafToCloudFront extends Construct {
             }
         }
         return value;
-    }
-
-    private getAction(action:string):
-        CfnWebACL.RuleActionProperty | 
-        CfnWebACL.OverrideActionProperty | 
-        CfnWebACL.DefaultActionProperty
-    {
-        return {
-            [action]: {}
-        }
-    }
-
-    private getRuleLabel(label:string):CfnWebACL.LabelProperty {
-        return {
-            name:label
-        }
     }
 }

@@ -26,7 +26,12 @@
   "homepage": "https://github.com/awslabs/aws-solutions-constructs#readme",
   "dependencies": {
     "@aws-cdk/aws-cloudfront": "^1.108.1",
+    "@aws-cdk/aws-iam": "^1.108.1",
+    "@aws-cdk/aws-lambda": "^1.108.1",
     "@aws-cdk/aws-wafv2": "^1.108.1",
-    "@aws-cdk/core": "^1.108.1"
+    "@aws-cdk/core": "^1.108.1",
+    "@aws-cdk/custom-resources": "^1.108.1",
+    "@types/node": "^15.12.2",
+    "aws-sdk": "^2.927.0"
   }
 }
