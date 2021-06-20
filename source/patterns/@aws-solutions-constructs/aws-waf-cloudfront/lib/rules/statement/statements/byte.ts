@@ -4,8 +4,7 @@ import { ByteMatchStatement, PositionalConstraint } from "../../../types"
 export class ByteMatch extends MatchHandler implements ByteMatchStatement{
     SearchString:string = ''
     PositionalConstraint: PositionalConstraint = 'EXACTLY'
-
-    get():ByteMatchStatement {
+        get():ByteMatchStatement {
         return {
             ...super.get(),
             SearchString:this.SearchString,

@@ -1,37 +1,36 @@
 import { WafRule } from "./rule"
-import {CountAction} from './actions';
-import { WebACLAction, WebACLActionRule, WebACLActionStatement } from "../types"
+import {CountAction,NoneAction} from './actions';
+import { WebACLOverride, WebACLOverrideRule, WebACLOverrideStatement } from "../types"
 
-export class WafActionRule extends WafRule implements WebACLActionRule {
-    Statement:WebACLActionStatement
+export class WafOverrideRule extends WafRule implements WebACLOverrideRule {
+    Statement:WebACLOverrideStatement
 
-    protected action:CountAction | 
+    protected overrideAction:CountAction | NoneAction
     
-    get():WebACLActionRule {
-        const action = this.action
-        if (!action) throw new Error("Rules must have either an Action or an Override field present")
+    get():WebACLOverrideRule {
+        const override = this.overrideAction
+        if (!override) throw new Error("Rules must have either an Action or an Override field present")
         return {
             ...super.get(),
-            Action: this.Action
+            OverrideAction: this.OverrideAction
         }
     }
 
-    get Action():WebACLAction {
-        return this.action.get();
+    get OverrideAction():WebACLOverride {
+        return this.overrideAction.get();
     }
 
-    allow(headers?:{[name:string]:string}):this {
-        this.action = new AllowAction(headers);
-        return this;
-    }
-
-    block(code?:number, bodyKey?:string, headers?:{[name:string]:string}):this {
-        this.action = new BlockAction(code, bodyKey, headers);
-        return this;
+    get Action():WebACLOverride {
+        return this.OverrideAction
     }
 
     count(headers?:{[name:string]:string}):this {
-        this.action = new CountAction(headers);
+        this.overrideAction = new CountAction(headers);
+        return this;
+    }
+
+    none():this {
+        this.overrideAction = new NoneAction();
         return this;
     }
 

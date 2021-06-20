@@ -1,6 +1,7 @@
 import { OrStatement,WebACLNestableStatement } from "../../../types";
 import { WafUtilityStatement } from "../utility";
 
-export class Or extends WafUtilityStatement {
+export class Or extends WafUtilityStatement implements OrStatement {
+    Statements:WebACLNestableStatement[]
 
 } 
