@@ -19,11 +19,6 @@ import * as WafTypes from './types';
 
 export interface WafToCloudFrontProps {
     distributionProps: DistributionProps
-    webACLProps?: WafProps
-}
-
- export interface WafProps {
-    rules?:WafRuleProps[]
     allowHeaders?: {[name:string]:string} | boolean
     blockHeaders?: {[name:string]:string} | boolean
     defaultErrorCode?:number
@@ -32,6 +27,9 @@ export interface WafToCloudFrontProps {
     sampledRequestsEnabled?:boolean
     description?:string
     tags?: {[name:string]:string}
+    customResponseBodies?:CustomResponseBody[]
+    defaultAction?:DefaultAction
+    rules?:CfnWebACL.RuleProperty[]
 }
 
 export interface WafRuleProps {
@@ -128,18 +126,28 @@ export enum TextTransformation {
     UrlDecode = 'URL_DECODE',
     None = 'NONE'
 }
+
+export interface CustomResponseBody {
+    key:string
+    type:CustomResponseBodyType
+    content:string | {[name:string]:any}
+}
  
 export enum CustomResponseBodyType {
      Json = 'APPLICATION_JSON',
      Html = 'TEXT_HTML',
      Plain = 'TEXT_PLAIN'
  }
+
+ export enum DefaultAction {
+    Allow = 'allow',
+    Block = 'block'
+}
  
  
  export class WafToCloudFront extends Construct {
-     readonly name = this.props.webACLProps.name || this.id
-     visibilityConfig = this.getVisibilityConfig(this.name, this.props.webACLPropscloudWatchMetricsEnabled, this.props.sampledRequestsEnabled)
-     rules:CfnWebACL.RuleProperty[] = this.getRules()
+     readonly name = this.props.name || this.id
+     visibilityConfig = this.getVisibilityConfig(this.name, this.props.cloudWatchMetricsEnabled, this.props.sampledRequestsEnabled)
      constructor(
          protected scope:Construct, 
          protected id:string,
@@ -196,22 +204,33 @@ export enum CustomResponseBodyType {
          }
          const eventOptions = {
              service:'WAFV2',
-             region:'us-east-1'
+             region:'us-east-1',
+             physicalResourceId:PhysicalResourceId.fromResponse('Summary.Id')
          }
-         const listCr = new AwsCustomResource(this.scope, name, {
+         const params = {
+            Name:name,
+            Scope: 'CLOUDFRONT'
+         }
+         return new AwsCustomResource(this.scope, name, {
              ...resourceOptions,
              onUpdate: {
                  ...eventOptions,
                  action:'createWebACL',
                  parameters: {
-                     Scope: 'CLOUDFRONT',
+                     ...params,
                      Region: 'us-east-1'
+                 }
+             },
+             onDelete: {
+                 ...eventOptions,
+                 action:'deleteWebACL',
+                 parameters: {
+                    ...params,
+                    Id:PhysicalResourceId.fromResponse('Summary.Id'),
+                    LockToken:PhysicalResourceId.fromResponse('Summary.LockToken')
                  }
              }
          });
-         const list = listCr.getResponseField('WebACLs');
-         let acl;
-         if (list )
      }
  
      protected getWebACLProps(): CfnWebACLProps { 
@@ -225,7 +244,7 @@ export enum CustomResponseBodyType {
              customResponseBodies,
              tags,
              description:this.props.description,
-             rules:this.rules
+             rules:this.props.rules
          }
      }
  
@@ -241,7 +260,7 @@ export enum CustomResponseBodyType {
      protected getRules():CfnWebACL.RuleProperty[] {
          let res = [];
          if (this.props.rules) res = res.concat(this.props.rules);
-         if (this.props.includeMinimalRuleConfig || !res.length) res = res.concat(this.getMinimalRuleConfig());
+         if (!res.length) res = res.concat(this.getMinimalRuleConfig());
  
          return res;
      }

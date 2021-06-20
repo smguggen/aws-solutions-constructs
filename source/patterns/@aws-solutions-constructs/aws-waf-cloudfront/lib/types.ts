@@ -4,29 +4,55 @@ export interface WebACL {
     DefaultAction:WebACLDefaultAction
     Name:string
     Scope:'CLOUDFRONT' | 'REGIONAL'
-    VisibilityConfig:WebACLVisibilityConfig
-    Rules?:WebACLRule[]
-    CustomResponseBodies?:WebACLCustomResponseBodies
+    VisibilityConfig:VisibilityConfig
+    Rules?:WebACLRule<WebACLStatement>[]
+    CustomResponseBodies?:CustomResponseBodies
     Description?:string
     Tags?:WebACLTag[]
 }
 
-export interface WebACLRule {
+export interface WebACLRule<S extends WebACLStatement> {
     Name:string
     Priority:number
-    Statement:WebACLStatement
-    VisibilityConfig:WebACLVisibilityConfig
+    Statement:S
+    VisibilityConfig:VisibilityConfig
     Action?:WebACLAction
     OverrideAction?:WebACLOverride
     RuleLabels?: {Name:string}[]
 }
 
-export interface WebACLVisibilityConfig {
+export interface WebACLActionRule extends Omit<WebACLRule<WebACLActionStatement>, 'OverrideAction'> {
+    Action:WebACLAction
+}
+
+export interface WebACLMatchRule extends Omit<WebACLRule<WebACLMatchStatement>, 'OverrideAction'> {
+    Action:WebACLAction
+}
+
+
+export interface WebACLOverrideRule extends Omit<WebACLRule<WebACLOverrideStatement>, 'Action'> {
+    OverrideAction:WebACLOverride
+}
+
+export interface VisibilityConfig {
     CloudWatchMetricsEnabled:boolean,
     MetricName: string,
     SampledRequestsEnabled:boolean
 }
 
+export type WafAction = WafAllow | WafBlock | WafCount
+
+export interface WafAllow {
+    Allow:WebACLAllow
+}
+
+export interface WafBlock {
+    Block:WebACLBlock
+}
+
+export interface WafCount {
+    Count:WebACLCount
+}
 export interface WebACLDefaultAction {
     Allow?: WebACLAllow
     Block?: WebACLBlock
@@ -42,7 +68,7 @@ export interface WebACLOverride {
 }
 
 export interface WebACLAllow {
-    CustomRequestHandling?:WebACLCustomRequestHandler
+    CustomRequestHandling?:CustomRequestHandling
 }
 
 export interface WebACLBlock {
@@ -56,18 +82,18 @@ export interface CustomResponseBody {
     ContentType:'APPLICATION_JSON' | 'TEXT_HTML' | 'TEXT_PLAIN'
 }
 
-export interface WebACLCustomResponseBodies {
+export interface CustomResponseBodies {
     [name:string]: CustomResponseBody
 }
 
 export interface WebACLCustomResponse {
     ResponseCode:number
-    CustomResponseBodyKey?:keyof WebACLCustomResponseBodies
-    ResponseHeaders?:CloudFrontHeaders
+    CustomResponseBodyKey?:keyof CustomResponseBodies
+    ResponseHeaders?:WebACLHeaders
 }
 
-export interface WebACLCustomRequestHandler {
-    InsertHeaders:CloudFrontHeaders
+export interface CustomRequestHandling {
+    InsertHeaders:WebACLHeaders
 }
 
 export interface WebACLTag {
@@ -75,15 +101,15 @@ export interface WebACLTag {
     Value:string
 }
 
-export interface CloudFrontHeader {
+export interface WebACLHeader {
     Name:string
     Value:string
 }
 
-export type CloudFrontHeaders = CloudFrontHeader[]
+export type WebACLHeaders = WebACLHeader[]
 
 export type WebACLNestableStatement = ByteMatchStatement | GeoMatchStatement | 
-    LabelMatchStatement | IPSetReferenceStatement | RegexPatternSetStatement |
+    LabelMatchStatement | IPSetReferenceStatement | RegexPatternSetReferenceStatement |
     SizeConstraintStatement | SqliMatchStatement | XssMatchStatement
     
 
@@ -96,14 +122,13 @@ export type WebACLUtilityStatement = AndStatement | OrStatement | NotStatement
 export type WebACLStatement = WebACLActionStatement | WebACLOverrideStatement | WebACLUtilityStatement
 
 export interface WebACLMatchStatement {
-    FieldToMatch:WebACLFieldToMatch
-    TextTransformations:WebACLTextTransformation[]
+    FieldToMatch:FieldToMatch
+    TextTransformations:TextTransformation[]
 }
 
 export interface ByteMatchStatement extends WebACLMatchStatement {
     SearchString:Buffer | string
-    PositionalConstraint: 'EXACTLY' | 'STARTS_WITH' | 'ENDS_WITH' |
-        'CONTAINS' | 'CONTAINS_WORD'
+    PositionalConstraint: PositionalConstraint
 }
 
 export interface GeoMatchStatement {
@@ -121,12 +146,12 @@ export interface LabelMatchStatement {
     Scope: 'LABEL' | 'NAMESPACE'
 }
 
-export interface RegexPatternSetStatement extends WebACLMatchStatement {
+export interface RegexPatternSetReferenceStatement extends WebACLMatchStatement {
     ARN:string
 }
 
 export interface SizeConstraintStatement extends WebACLMatchStatement {
-    ComparisonOperator: 'EQ' | 'NE' | 'LE' | 'LT' | 'GE' | 'GT'
+    ComparisonOperator: ComparisonOperator
     Size:number
 }
 
@@ -138,14 +163,14 @@ export interface RateBasedStatement {
     AggregateKeyType: 'IP' | 'FORWARDED_IP'
     Limit: number
     ForwardedIPConfig?:ForwardedIPConfig
-    ScopeDownStatement?:WebACLNestableStatement
+    ScopeDownStatement?:WebACLStatement
 }
 
 export interface ManagedRuleGroupStatement {
     Name:string
     VendorName:string
     ExcludedRules?:ExcludedRule[]
-    ScopeDownStatement?:WebACLNestableStatement
+    ScopeDownStatement?:WebACLStatement
 }
 
 export interface RuleGroupReferenceStatement {
@@ -165,7 +190,7 @@ export interface AndStatement {
     Statements: WebACLNestableStatement[]
 }
 
-export interface WebACLFieldToMatch {
+export interface FieldToMatch {
     SingleHeader?:WebACLArgument
     AllQueryArguments?:WebACLArgumentMap
     SingleQueryArgument?:WebACLArgument
@@ -173,21 +198,26 @@ export interface WebACLFieldToMatch {
     Method?:WebACLArgumentMap
     UriPath?:WebACLArgumentMap
     QueryString?:WebACLArgumentMap
-    JsonBody?:WebACLJsonBody
+    JsonBody?:JsonBody
 }
 
-export interface WebACLJsonBody {
-    MatchPattern:WebACLMatchPattern
+export type ComparisonOperator = 'EQ' | 'NE' | 'LE' | 'LT' | 'GE' | 'GT'
+
+export type PositionalConstraint = 'EXACTLY' | 'STARTS_WITH' | 'ENDS_WITH' |
+'CONTAINS' | 'CONTAINS_WORD';
+
+export interface JsonBody {
+    MatchPattern:MatchPattern
     MatchScope: 'ALL' | 'KEY' | 'VALUE'
     InvalidFallbackBehavior?: 'MATCH' | 'NO_MATCH' | 'EVALUATE_AS_STRING'
 }
 
-export interface WebACLMatchPattern {
+export interface MatchPattern {
     All?:WebACLArgumentMap
     IncludedPaths?:string[]
 }
 
-export interface WebACLTextTransformation {
+export interface TextTransformation {
     Priority:Number
     Type: 'NONE' | 'COMPRESS_WHITE_SPACE' | 'HTML_ENTITY_DECODE' |      
         'LOWERCASE' | 'CMD_LINE' | 'URL_DECODE'
@@ -234,6 +264,8 @@ export type CountryCode = "AF" | "AX" | "AL" | "DZ" | "AS" | "AD" | "AO" |
     "TR" | "TM" | "TC" | "TV" | "UG" | "UA" | "AE" | "GB" | "US" | "UM" | 
     "UY" | "UZ" | "VU" | "VE" | "VN" | "VG" | "VI" | "WF" | "EH" | "YE" | 
     "ZM" | "ZW"
+
+export type CountryCodes = CountryCode[]
     
 export interface ExcludedRule {
     Name:string

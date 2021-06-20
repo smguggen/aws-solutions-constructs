@@ -1,4 +1,4 @@
-import {ActionHandler} from './action';
+import {ActionHandler} from '../action';
 import {
     MatchHandler,
     FieldToMatch,
@@ -7,7 +7,7 @@ import {
 } from './match';
 import {
     ByteMatchStatement
-} from '../types';
+} from '../../types';
 
 export enum WafStatement {
     Byte = 'ByteMatchStatement',
@@ -64,10 +64,11 @@ export class RuleStatement {
 
     byteMatch(str:string):MatchHandler {
         this.set(WafStatement.Byte);
-        
+
+        return new MatchHandler();
     }
 
-
+    regexPatternSet()
 
     set(waf:WafStatement):this {
         this.name = waf;

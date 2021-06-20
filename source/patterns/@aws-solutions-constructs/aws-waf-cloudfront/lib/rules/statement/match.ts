@@ -1,7 +1,5 @@
-import {WebACLFieldToMatch,WebACLTextTransformation,WebACLAction} from '../types';
-import {ActionHandler,StatementFields} from './action';
-
-
+import {FieldToMatch,TextTransformation} from '../../types';
+import { WafActionStatement } from './action';
 export enum TextTransformationType {
     CommandLine = 'CMD_LINE',
     Compress = 'COMPRESS_WHITE_SPACE',
@@ -11,7 +9,7 @@ export enum TextTransformationType {
     None = 'NONE'
 }
 
-export enum FieldToMatch {
+export enum FieldToMatchType {
     Header = 'SingleHeader',
     Argument = 'SingleQueryArgument',
     Arguments = 'AllQueryArguments',
@@ -27,18 +25,23 @@ export enum MatchScope {
     Key = 'KEY',
     Value = 'VALUE'
 }
+export class MatchHandler extends WafActionStatement {
 
-interface MatchStatementFields extends StatementFields {
-    FieldToMatch:WebACLFieldToMatch
-    TextTransformations: WebACLTextTransformation[]
-}
-
-
-export class MatchHandler extends ActionHandler {
-    protected fieldToMatch:WebACLFieldToMatch
+    params:any = {}
+    FieldToMatch:FieldToMatch
     protected textTransformationTypes:TextTransformationType[] = []
 
-    protected get textTransformations():WebACLTextTransformation[] {
+    get():any {
+        if (!this.FieldToMatch) this.FieldToMatch = {
+            UriPath:{}
+        }
+        return {
+            FieldToMatch:this.FieldToMatch,
+            TextTransformations:this.TextTransformations
+        }
+    }
+
+    get TextTransformations():TextTransformation[] {
         if (!this.textTransformationTypes || !this.textTransformationTypes.length) {
             return [{
                 Priority:0,
@@ -50,21 +53,9 @@ export class MatchHandler extends ActionHandler {
         });
     }
 
-    get():MatchStatementFields {
-        if (!this.fieldToMatch) this.fieldToMatch = {
-            UriPath:{}
-        }
-        return {
-            ...super.get(),
-            FieldToMatch:this.fieldToMatch,
-            TextTransformations:this.textTransformations
-        }
-    }
-
-
-    match(Type:FieldToMatch, value?:string | string[], scope:MatchScope = MatchScope.All):this {
+    match(Type:FieldToMatchType, value?:string | string[], scope:MatchScope = MatchScope.All):this {
         let res:any = {}
-        if (Type === FieldToMatch.Json) {
+        if (Type === FieldToMatchType.Json) {
             res = {
                 JsonBody:{
                     MatchPattern:{}
@@ -78,23 +69,23 @@ export class MatchHandler extends ActionHandler {
             }
             res.JsonBody.MatchScope = scope;
             res.JsonBody.InvalidFallbackBehavior = 'EVALUATE_AS_STRING';
-            this.fieldToMatch = res;
+            this.FieldToMatch = res;
             return this;
         }
-        if (Type === FieldToMatch.Header || Type === FieldToMatch.Argument) {
-            const key = Type === FieldToMatch.Header ? 'SingleHeader' : 'SingleQueryArgument';
-            this.fieldToMatch = {
+        if (Type === FieldToMatchType.Header || Type === FieldToMatchType.Argument) {
+            const key = Type === FieldToMatchType.Header ? 'SingleHeader' : 'SingleQueryArgument';
+            this.FieldToMatch = {
                 [key]: {
                     Name:value as string
                 }
             }
             return this;
         }
-        this.fieldToMatch = {[Type]:{}}
+        this.FieldToMatch = {[Type]:{}}
         return this;
     }
 
-    transformation(Type:TextTransformationType,Priority:number = this.textTransformations.length):this {
+    transformation(Type:TextTransformationType,Priority:number = this.TextTransformations.length):this {
         this.textTransformationTypes = this.textTransformationTypes.filter(type => type != Type);
         this.textTransformationTypes.splice(Priority,0,Type);
         return this;
