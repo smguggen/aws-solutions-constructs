@@ -1,4 +1,4 @@
-import { LabelMatchStatement} from "../../../types";
+import { LabelMatchStatement } from "../../../types";
 import { WafActionStatement } from "../action";
 
 export class LabelMatch extends WafActionStatement implements LabelMatchStatement {

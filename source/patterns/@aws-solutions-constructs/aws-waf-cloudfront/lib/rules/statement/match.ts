@@ -1,35 +1,17 @@
-import {FieldToMatch,TextTransformation} from '../../types';
+import {
+    FieldToMatch,
+    TextTransformation,
+    FieldToMatchProperty,
+    TextTransformationProperty,
+    MatchScope
+} from '../../types';
 import { WafActionStatement } from './action';
-export enum TextTransformationType {
-    CommandLine = 'CMD_LINE',
-    Compress = 'COMPRESS_WHITE_SPACE',
-    HtmlDecode = 'HTML_ENTITY_DECODE',
-    Lowercase = 'LOWERCASE',
-    UrlDecode = 'URL_DECODE',
-    None = 'NONE'
-}
 
-export enum FieldToMatchType {
-    Header = 'SingleHeader',
-    Argument = 'SingleQueryArgument',
-    Arguments = 'AllQueryArguments',
-    Body = 'Body',
-    Method = 'Method',
-    Path = 'UriPath',
-    Query = 'QueryString',
-    Json = 'JsonBody'
-}
-
-export enum MatchScope {
-    All = 'ALL',
-    Key = 'KEY',
-    Value = 'VALUE'
-}
 export class MatchHandler extends WafActionStatement {
 
     params:any = {}
     FieldToMatch:FieldToMatch
-    protected textTransformationTypes:TextTransformationType[] = []
+    protected textTransformationTypes:TextTransformationProperty[] = []
 
     get():any {
         if (!this.FieldToMatch) this.FieldToMatch = {
@@ -53,9 +35,9 @@ export class MatchHandler extends WafActionStatement {
         });
     }
 
-    match(Type:FieldToMatchType, value?:string | string[], scope:MatchScope = MatchScope.All):this {
+    match(Type:FieldToMatchProperty, value?:string | string[], scope:MatchScope = MatchScope.All):this {
         let res:any = {}
-        if (Type === FieldToMatchType.Json) {
+        if (Type === FieldToMatchProperty.Json) {
             res = {
                 JsonBody:{
                     MatchPattern:{}
@@ -72,8 +54,8 @@ export class MatchHandler extends WafActionStatement {
             this.FieldToMatch = res;
             return this;
         }
-        if (Type === FieldToMatchType.Header || Type === FieldToMatchType.Argument) {
-            const key = Type === FieldToMatchType.Header ? 'SingleHeader' : 'SingleQueryArgument';
+        if (Type === FieldToMatchProperty.Header || Type === FieldToMatchProperty.Argument) {
+            const key = Type === FieldToMatchProperty.Header ? 'SingleHeader' : 'SingleQueryArgument';
             this.FieldToMatch = {
                 [key]: {
                     Name:value as string
@@ -85,13 +67,13 @@ export class MatchHandler extends WafActionStatement {
         return this;
     }
 
-    transformation(Type:TextTransformationType,Priority:number = this.TextTransformations.length):this {
+    transformation(Type:TextTransformationProperty,Priority:number = this.TextTransformations.length):this {
         this.textTransformationTypes = this.textTransformationTypes.filter(type => type != Type);
         this.textTransformationTypes.splice(Priority,0,Type);
         return this;
     }
 
-    transformations(...types:TextTransformationType[]):this {
+    transformations(...types:TextTransformationProperty[]):this {
         this.textTransformationTypes = this.textTransformationTypes.concat(types);
         return this;
     }

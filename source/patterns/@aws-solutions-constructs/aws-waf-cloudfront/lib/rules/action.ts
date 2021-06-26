@@ -1,13 +1,13 @@
 import { WafRule } from "./rule"
 import {AllowAction,BlockAction,CountAction} from './actions';
-import { WebACLAction, WebACLActionRule, WebACLActionStatement } from "../types"
+import { Action, ActionRule, ActionStatement } from "../types"
 
-export class WafActionRule extends WafRule implements WebACLActionRule {
-    Statement:WebACLActionStatement
+export class WafActionRule extends WafRule implements ActionRule {
+    Statement:ActionStatement
 
     protected action:AllowAction | BlockAction | CountAction
     
-    get():WebACLActionRule {
+    get():ActionRule {
         const action = this.action
         if (!action) throw new Error("Rules must have either an Action or an Override field present")
         return {
@@ -16,7 +16,7 @@ export class WafActionRule extends WafRule implements WebACLActionRule {
         }
     }
 
-    get Action():WebACLAction {
+    get Action():Action {
         return this.action.get();
     }
 

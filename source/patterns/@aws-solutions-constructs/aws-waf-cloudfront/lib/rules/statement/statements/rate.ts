@@ -1,4 +1,4 @@
-import { RateBasedStatement, WebACLStatement } from "../../../types";
+import { RateBasedStatement,WebACLStatement } from "../../../types";
 import { ForwardedIPHandler } from "../forwarded-ip";
 
 export class RateBased extends ForwardedIPHandler implements RateBasedStatement {
@@ -41,7 +41,7 @@ export class RateBased extends ForwardedIPHandler implements RateBasedStatement 
         return this.forwardedIP();
     }
 
-    scopeDownget(statement:WebACLStatement):this {
+    scopeDown(statement:WebACLStatement):this {
         this.ScopeDownStatement = statement;
         return this;
     }

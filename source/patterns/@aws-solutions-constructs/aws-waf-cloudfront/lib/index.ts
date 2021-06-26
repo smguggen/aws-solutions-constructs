@@ -18,14 +18,14 @@ import {CfnWebACL, CfnWebACLProps} from '@aws-cdk/aws-wafv2';
 
 export interface WafToCloudFrontProps {
     distributionProps: DistributionProps
-    defaultAction?:DefaultAction | CfnWebACL.DefaultActionProperty
+    defaultAction?:DefaultAction | CfnWebACL.Sdk.DefaultActionProperty
     name?:string
     description?:string
     customResponseBodies?:CustomResponseBody[]
     cloudWatchMetricsEnabled?:boolean
     sampledRequestsEnabled?:boolean
     tags?: (CfnTag | {[name:string]:any})[]
-    rules?: CfnWebACL.RuleProperty[]
+    rules?: CfnWebACL.Sdk.RuleProperty[]
     includeMinimalRuleConfig?:boolean
 }
 
@@ -49,7 +49,7 @@ export enum DefaultAction {
 export class WafToCloudFront extends Construct {
     readonly name = this.props.name || this.id
     visibilityConfig = this.getVisibilityConfig(this.name, this.props.cloudWatchMetricsEnabled, this.props.sampledRequestsEnabled)
-    rules:CfnWebACL.RuleProperty[] = this.getRules()
+    rules:CfnWebACL.Sdk.RuleProperty[] = this.getRules()
     constructor(
         protected scope:Construct, 
         protected id:string,
@@ -61,9 +61,9 @@ export class WafToCloudFront extends Construct {
     }
     getMinimalRuleConfig(
         action: 'none' | 'count' = 'none',
-        excluded?:(string | CfnWebACL.ExcludedRuleProperty)[],
-        scopeDownStatement?: CfnWebACL.StatementProperty
-    ): CfnWebACL.RuleProperty[] {
+        excluded?:(string | CfnWebACL.Sdk.ExcludedRuleProperty)[],
+        scopeDownStatement?: CfnWebACL.Sdk.StatementProperty
+    ): CfnWebACL.Sdk.RuleProperty[] {
         const props = {
             visibilityConfig:this.getVisibilityConfig(`${this.name}MinimalRuleConfig`, true,true),
             overrideAction: {[action]:{}},
@@ -139,7 +139,7 @@ export class WafToCloudFront extends Construct {
         }
     }
 
-    protected getDefaultAction(action:DefaultAction | CfnWebACL.DefaultActionProperty): CfnWebACL.DefaultActionProperty {
+    protected getDefaultAction(action:DefaultAction | CfnWebACL.Sdk.DefaultActionProperty): CfnWebACL.Sdk.DefaultActionProperty {
         if (typeof action === 'string') {
             return {
                 [action]: {}
@@ -148,7 +148,7 @@ export class WafToCloudFront extends Construct {
         return action;
     }
 
-    protected getRules():CfnWebACL.RuleProperty[] {
+    protected getRules():CfnWebACL.Sdk.RuleProperty[] {
         let res = [];
         if (this.props.rules) res = res.concat(this.props.rules);
         if (this.props.includeMinimalRuleConfig || !res.length) res = res.concat(this.getMinimalRuleConfig());
@@ -159,7 +159,7 @@ export class WafToCloudFront extends Construct {
         name:string,
         metricsEnabled?:any, 
         requestsEnabled?:any
-    ): CfnWebACL.VisibilityConfigProperty {
+    ): CfnWebACL.Sdk.VisibilityConfigProperty {
         const cloudWatchMetricsEnabled = typeof metricsEnabled === 'boolean' ?metricsEnabled : true; 
         const sampledRequestsEnabled = typeof requestsEnabled === 'boolean' ?requestsEnabled : true;
         return {
@@ -170,7 +170,7 @@ export class WafToCloudFront extends Construct {
     }
 
     protected getCustomResponseBodies(body:CustomResponseBody[] = []): {
-        [name:string]:CfnWebACL.CustomResponseBodyProperty
+        [name:string]:CfnWebACL.Sdk.CustomResponseBodyProperty
     } {
         const $this = this;
         return body.reduce((acc,b) => {

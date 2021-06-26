@@ -3,7 +3,7 @@ import { GeoMatch } from "./geo";
 import { IPSetReference } from "./ip";
 import { RegexPatternSetReference } from "./regex";
 import { LabelMatch } from "./label";
-import { ManagedPolicy } from "@aws-cdk/aws-iam";
+import { RuleGroupReference } from "./rule-group";
 import { ManagedRuleGroup } from "./managed";
 import { RateBased } from "./rate";
 import { SizeConstraint } from "./size-constraint";
@@ -19,7 +19,7 @@ export {
     IPSetReference,
     RegexPatternSetReference,
     LabelMatch,
-    ManagedPolicy,
+    RuleGroupReference,
     ManagedRuleGroup,
     RateBased,
     SizeConstraint,

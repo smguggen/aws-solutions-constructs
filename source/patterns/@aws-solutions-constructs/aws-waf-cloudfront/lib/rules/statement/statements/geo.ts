@@ -1,5 +1,5 @@
 import { ForwardedIPHandler } from "../forwarded-ip";
-import { GeoMatchStatement, CountryCode, CountryCodes } from "../../../types";
+import { GeoMatchStatement,CountryCode,CountryCodes } from "../../../types";
 
 export class GeoMatch extends ForwardedIPHandler implements GeoMatchStatement {
     CountryCodes:CountryCodes = []

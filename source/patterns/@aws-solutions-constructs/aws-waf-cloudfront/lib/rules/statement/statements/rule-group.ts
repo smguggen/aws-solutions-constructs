@@ -1,4 +1,4 @@
-import { RuleGroupReferenceStatement, ExcludedRule } from "../../../types";
+import { RuleGroupReferenceStatement,ExcludedRule } from "../../../types";
 import { WafOverrideStatement } from "../override";
 
 export class RuleGroupReference extends WafOverrideStatement implements RuleGroupReferenceStatement {

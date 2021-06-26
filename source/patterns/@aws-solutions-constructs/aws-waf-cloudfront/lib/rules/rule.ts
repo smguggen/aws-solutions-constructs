@@ -1,11 +1,9 @@
 
 import { WafOverrideStatement } from './statement/override';
-import { 
-    WebACLAction,
-    WebACLOverride,
-    WebACLRule,
+import {
     WebACLStatement,
-    VisibilityConfig, 
+    VisibilityConfig,
+    WebACLRule,
     CustomResponseBody,
 } from '../types';
 export class WafRule implements WebACLRule<WebACLStatement> {
@@ -88,7 +86,7 @@ export class WafRule implements WebACLRule<WebACLStatement> {
     }
 
     /*protected getCustomResponseBodies(body:CustomResponseBody[] = []): {
-        [name:string]:CfnWebACL.CustomResponseBodyProperty
+        [name:string]:CfnWebACL.Sdk.CustomResponseBodyProperty
     } {
         const $this = this;
         return body.reduce((acc,b) => {

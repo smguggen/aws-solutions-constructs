@@ -1,145 +1,103 @@
-import {ActionHandler} from '../action';
-import {
-    MatchHandler,
-    FieldToMatch,
-    MatchScope,
-    TextTransformationType
-} from './match';
-import {
-    ByteMatchStatement
-} from '../../types';
-
-export enum WafStatement {
-    Byte = 'ByteMatchStatement',
-    Regex = 'RegexPatternSetStatement',
-    Size = 'SizeConstraintStatement',
-    Sql = 'SqliMatchStatement',
-    Xss = 'XssMatchStatement',
-
-    Geo = 'GeoMatchStatement',
-    Label = 'LabelMatchStatement',
-    IP = 'IPSetReferenceStatement',
-
-    Rate = 'RateBasedStatement',
-
-    Managed = 'ManagedRuleGroupStatement',
-    Group = 'RuleGroupReferenceStatement',
-
-    And = 'AndStatement',
-    Or = 'OrStatement',
-    Not = 'NotStatement',
-    None = ''
-}
-
-export interface ActionStatementProps {
-    allowHeaders?: {[name:string]:string} | boolean
-    blockHeaders?: {[name:string]:string} | boolean
-    countHeaders?: {[name:string]:string} | boolean
-}
-
-export interface MatchStatementProps extends ActionStatementProps {
-    field: FieldToMatch
-    value?: string | string[]
-    scope?:MatchScope
-    textTransformations?:TextTransformationType[]
-}
-
-export interface StatementTypeMap {
-    match:WafStatement[]
-    action:WafStatement[]
-    override:WafStatement[]
-    nestable:WafStatement[]
-    utility:WafStatement[]
-}
-
-export interface WafOverrideStatementProps {
-    countHeaders?: {[name:string]:string} | boolean
-}
-
-
+import { FindStatement, StatementInstance } from './find';
+import {    
+    ByteMatch, 
+    GeoMatch, 
+    LabelMatch, 
+    IPSetReference, 
+    RegexPatternSetReference,
+    SizeConstraint, 
+    SqliMatch, 
+    XssMatch,
+    RateBased,
+    And,
+    Or,
+    Not,
+    RuleGroupReference,
+    ManagedRuleGroup
+} from './statements'
+import {StatementProperty,WebACLStatement,NestableStatement} from '../../types';
 export class RuleStatement {
-    name:WafStatement = WafStatement.None
-    protected type:keyof StatementTypeMap
-    protected typeMap:StatementTypeMap = this.$typeMap()
+    type:StatementProperty
+    statement:StatementInstance
+    private finder = new FindStatement()
+    
+    get():WebACLStatement {
+        return {
+            [this.type]: {
 
-    byteMatch(str:string):MatchHandler {
-        this.set(WafStatement.Byte);
-
-        return new MatchHandler();
+            }
+        }
+    }
+    set(type:StatementProperty):StatementInstance {
+        this.type = type;
+        this.statement = this.finder.getStatement(type);
+        return this.statement;
     }
 
-    regexPatternSet()
+    and(...types:(StatementProperty | StatementInstance)[]) {
+        types.unshift(this.type);
+        this.set(StatementProperty.And) as And;
 
-    set(waf:WafStatement):this {
-        this.name = waf;
-        this.type = this.getType(waf);
-        return this;
     }
 
+    or(...types:(StatementProperty | StatementInstance)[]) {
+        types.unshift(this.type);
+        this.set(StatementProperty.Or) as Or;
 
-    get isValid():boolean {
-        return this.name !== WafStatement.None
+    }
+    not(...types:(StatementProperty | StatementInstance)[]) {
+        types.unshift(this.type);
+        this.set(StatementProperty.And) as Not;
+    }
+    byte():ByteMatch {
+        return this.set(StatementProperty.Byte) as ByteMatch;
+    }
+    regex():RegexPatternSetReference {
+       return this.set(StatementProperty.Regex) as RegexPatternSetReference;
+    }
+    size():SizeConstraint {
+        return this.set(StatementProperty.Size) as SizeConstraint;
+    }
+    sql():SqliMatch {
+        return this.set(StatementProperty.Sql) as SqliMatch;
+    }
+    xss():XssMatch {
+        return this.set(StatementProperty.Xss) as XssMatch;
+    }
+    geo():GeoMatch {
+        return this.set(StatementProperty.Geo) as GeoMatch;
+    }
+    label():LabelMatch {
+        return this.set(StatementProperty.Label) as LabelMatch;
+    }
+    ip():IPSetReference {
+        return this.set(StatementProperty.IP) as IPSetReference;
+    }
+    rate():RateBased {
+        return this.set(StatementProperty.Rate) as RateBased;
+    }
+    managed():ManagedRuleGroup {
+        return this.set(StatementProperty.Managed) as ManagedRuleGroup;
+    }
+    group():RuleGroupReference {
+        return this.set(StatementProperty.Group) as RuleGroupReference;
+    }
+    get utility():'And' | 'Or' | 'Not' | null {
+        const ut = ['AndStatement', 'OrStatement', 'NotStatement'].includes(this.type);
+        if (ut) return this.type.replace('Statement', '') as 'And' | 'Or' | 'Not';
+        return null;
     }
 
-    get isAction():boolean {
-        return this.typeMap.action.includes(this.name);
+    isNestable(type:StatementProperty):boolean {
+        return [
+            'ByteMatchStatement', 'GeoMatchStatement', 
+            'LabelMatchStatement', 'IPSetReferenceStatement','RegexPatternSetReferenceStatement','SizeConstraintStatement', 'SqliMatchStatement', 'XssMatchStatement'
+        ].includes(type);
     }
+    private getUtility(type?:string): 'And' | 'Or' | 'Not' {
+        const res = type.substring(0,1).toUpperCase() + type.substring(1).toLowerCase();
+        if (!(['And','Or','Not'].includes(res))) throw new Error(`${res} is not a Utility Type`);
+        return res as 'And' | 'Or' | 'Not';
+    } 
 
-    get isOverride():boolean {
-        return this.typeMap.override.includes(this.name);
-    }
-
-    get isNestable():boolean {
-        return this.typeMap.nestable.includes(this.name);
-    }
-
-    get isUtility():boolean {
-        return this.typeMap.utility.includes(this.name);
-    }
-
-    reset() {
-        this.name === WafStatement.None
-    }
-
-    protected getType(waf:WafStatement):keyof StatementTypeMap {
-        if (this.typeMap.match.includes(waf)) return 'match';
-        if (this.typeMap.nestable.includes(waf)) return  'nestable'; 
-        if (this.typeMap.action.includes(waf)) return  'action'; 
-        if (this.typeMap.override.includes(waf)) return 'override';
-        if (this.typeMap.utility.includes(waf)) return 'utility';
-    }
-
-
-
-    protected $typeMap():StatementTypeMap {
-        const res:any = {};
-        res.match = [
-            WafStatement.Byte,
-            WafStatement.Regex,
-            WafStatement.Size,
-            WafStatement.Sql,
-            WafStatement.Xss,
-        ];
-        res.nestable = [
-            ...res.match,
-            WafStatement.Geo,
-            WafStatement.Label,
-            WafStatement.IP,
-        ]
-        res.action = [
-            ...res.nestable,
-            WafStatement.Rate,
-        ];
-        res.override = [
-            WafStatement.Managed,
-            WafStatement.Group,
-        ];
-
-        res.utility = [
-            WafStatement.And,
-            WafStatement.Or,
-            WafStatement.Not
-        ];
-        return res;
-    }
-}   
+}

@@ -56,8 +56,8 @@ export class CFWaf {
         this.acl = new CfnWebACL(this.scope, this.name, this.options);
     }
 
-    parseDefaultAction(options:CF.Waf.Options = {}): CfnWebACL.DefaultActionProperty {
-        let actionKey: keyof CfnWebACL.DefaultActionProperty; 
+    parseDefaultAction(options:CF.Waf.Options = {}): CfnWebACL.Sdk.DefaultActionProperty {
+        let actionKey: keyof CfnWebACL.Sdk.DefaultActionProperty; 
         if (options.defaultAction) {
             actionKey = options.defaultAction;
         } else if (options.actions && options.actions.default) {
@@ -68,7 +68,7 @@ export class CFWaf {
         return {[actionKey]:{}}
     }
 
-    parseRules(rules:(CfnWebACL.RuleProperty | CFManagedRule)[] = []): CfnWebACL.RuleProperty[] {
+    parseRules(rules:(CfnWebACL.Sdk.RuleProperty | CFManagedRule)[] = []): CfnWebACL.Sdk.RuleProperty[] {
         if (!rules || !rules.length) return this.getDefaultRules();
         return rules.map(rule => {
             if (rule instanceof CFManagedRule) {
@@ -79,7 +79,7 @@ export class CFWaf {
         })
     }
 
-    getVisibility(name:string = getName(this.name, 'Visibility'), metrics:boolean = true, samples:boolean = false): CfnWebACL.VisibilityConfigProperty {
+    getVisibility(name:string = getName(this.name, 'Visibility'), metrics:boolean = true, samples:boolean = false): CfnWebACL.Sdk.VisibilityConfigProperty {
         return {
             cloudWatchMetricsEnabled: metrics,
             metricName: name,
@@ -87,7 +87,7 @@ export class CFWaf {
         }
     }
 
-    getDefaultRules(options:CF.Waf.Options = {}): CfnWebACL.RuleProperty[] {
+    getDefaultRules(options:CF.Waf.Options = {}): CfnWebACL.Sdk.RuleProperty[] {
         const action = options.actions && CFManagedRule.isRuleAction(options.actions.rules) ? options.actions.rules : 'none';
         return [
             {key: 'adminProtection', value: 'AWSManagedRulesAdminProtectionRuleSet'},

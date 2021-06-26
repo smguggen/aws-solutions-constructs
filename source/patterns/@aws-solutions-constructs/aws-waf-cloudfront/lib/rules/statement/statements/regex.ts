@@ -1,7 +1,7 @@
 import { MatchHandler } from "../match";
 import { RegexPatternSetReferenceStatement } from "../../../types"
 ;
-export class RegexPatternSetReference extends MatchHandler implements RegexPatternSetReferenceStatement{
+export class RegexPatternSetReference extends MatchHandler implements RegexPatternSetReferenceStatement {
    ARN:string = ''
 
    arn(str:string): this {

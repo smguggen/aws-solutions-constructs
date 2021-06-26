@@ -1,5 +1,5 @@
 import { ActionBase } from './base'
-import {WafAllow,WebACLHeaders} from '../../types'
+import {AllowProperty, WebACLHeaders} from '../../types'
 
 export class AllowAction extends ActionBase {
 
@@ -8,7 +8,7 @@ export class AllowAction extends ActionBase {
         if (headers) this.insertHeaders(headers);
     }
 
-    get():WafAllow {
+    get():AllowProperty {
         const res:any = {
             Allow:{}
         }

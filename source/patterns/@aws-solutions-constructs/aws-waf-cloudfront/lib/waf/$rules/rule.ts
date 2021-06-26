@@ -4,13 +4,13 @@ import {CF} from '../..';
 import {getName,capitalize} from '../../util';
 
 export class CFManagedRule {
-    statement:CfnWebACL.StatementOneProperty
+    statement:CfnWebACL.Sdk.StatementOneProperty
     Statement: any
-    visibility: CfnWebACL.VisibilityConfigProperty
+    visibility: CfnWebACL.Sdk.VisibilityConfigProperty
     Visibility:any
     actionType: 'action' | 'override';
-    readonly action?: CfnWebACL.RuleActionProperty
-    readonly override?: CfnWebACL.OverrideActionProperty
+    readonly action?: CfnWebACL.Sdk.RuleActionProperty
+    readonly override?: CfnWebACL.Sdk.OverrideActionProperty
     readonly Action:any
     readonly Override:any
 
@@ -21,7 +21,7 @@ export class CFManagedRule {
         public priority:number = 0,
         action: CF.Waf.RuleAction = 'count',
         public excluded: string[] = [],
-        visibility?: CfnWebACL.VisibilityConfigProperty
+        visibility?: CfnWebACL.Sdk.VisibilityConfigProperty
     ) {
         this.statement = this.getStatement();
         this.Statement = this.GetStatement();
@@ -55,15 +55,15 @@ export class CFManagedRule {
         return ['Allow', 'Block', 'Count', 'None'].includes(name);
     }
 
-    static get(name: string, statementName:string, priority: number, action?: CF.Waf.RuleAction, excluded?:string[],vendor?:string): CfnWebACL.RuleProperty {
+    static get(name: string, statementName:string, priority: number, action?: CF.Waf.RuleAction, excluded?:string[],vendor?:string): CfnWebACL.Sdk.RuleProperty {
         return (new CFManagedRule(name, statementName, vendor, priority, action, excluded)).get();
     }
 
-    static Get(name: string, statementName:string, priority: number, action?: CF.Waf.RuleAction, excluded?:string[],vendor?:string): CfnWebACL.RuleProperty {
+    static Get(name: string, statementName:string, priority: number, action?: CF.Waf.RuleAction, excluded?:string[],vendor?:string): CfnWebACL.Sdk.RuleProperty {
         return (new CFManagedRule(name, statementName, vendor, priority, action, excluded)).Get();
     }
 
-    get(): CfnWebACL.RuleProperty {
+    get(): CfnWebACL.Sdk.RuleProperty {
         return {
             name: this.name,
             priority: this.priority,
@@ -97,11 +97,11 @@ export class CFManagedRule {
         return res;
     }
 
-    getStatement(): CfnWebACL.StatementOneProperty {
+    getStatement(): CfnWebACL.Sdk.StatementOneProperty {
         return CFManagedStatement.get(this.statementName, this.vendor, this.excluded);
     }
 
-    GetStatement(): CfnWebACL.StatementOneProperty {
+    GetStatement(): CfnWebACL.Sdk.StatementOneProperty {
         return CFManagedStatement.Get(this.statementName, this.vendor, this.excluded);
     }
 }

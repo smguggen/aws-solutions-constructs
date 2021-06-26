@@ -1,7 +1,7 @@
 import { MatchHandler } from "../match";
-import { ByteMatchStatement, PositionalConstraint } from "../../../types"
+import { ByteMatchStatement,PositionalConstraint } from "../../../types"
 ;
-export class ByteMatch extends MatchHandler implements ByteMatchStatement{
+export class ByteMatch extends MatchHandler implements ByteMatchStatement {
     SearchString:string = ''
     PositionalConstraint: PositionalConstraint = 'EXACTLY'
         get():ByteMatchStatement {

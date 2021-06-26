@@ -1,4 +1,4 @@
-import { ManagedRuleGroupStatement, ExcludedRule, WebACLStatement } from "../../../types";
+import { ManagedRuleGroupStatement,ExcludedRule,WebACLStatement } from "../../../types";
 import { WafOverrideStatement } from "../override";
 
 export class ManagedRuleGroup extends WafOverrideStatement implements ManagedRuleGroupStatement {

@@ -1,4 +1,4 @@
-import {WebACLHeaders} from '../../types'
+import {WebACLHeaders,} from '../../types'
 
 export class ActionBase {
     headers:WebACLHeaders = []

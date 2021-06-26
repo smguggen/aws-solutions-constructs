@@ -1,14 +1,14 @@
 ///<reference types="@types/node"/>
 
-export interface WebACL {
-    DefaultAction:WebACLDefaultAction
+export interface WebACLProps {
+    DefaultAction:DefaultAction
     Name:string
     Scope:'CLOUDFRONT' | 'REGIONAL'
     VisibilityConfig:VisibilityConfig
     Rules?:WebACLRule<WebACLStatement>[]
     CustomResponseBodies?:CustomResponseBodies
     Description?:string
-    Tags?:WebACLTag[]
+    Tags?:Tag[]
 }
 
 export interface WebACLRule<S extends WebACLStatement> {
@@ -16,22 +16,26 @@ export interface WebACLRule<S extends WebACLStatement> {
     Priority:number
     Statement:S
     VisibilityConfig:VisibilityConfig
-    Action?:WebACLAction
-    OverrideAction?:WebACLOverride
+    Action?:Action
+    OverrideAction?:Override
     RuleLabels?: {Name:string}[]
 }
 
-export interface WebACLActionRule extends Omit<WebACLRule<WebACLActionStatement>, 'OverrideAction'> {
-    Action:WebACLAction
+export interface ActionRule extends Omit<WebACLRule<ActionStatement>,'OverrideAction'> {
+    Action:Action
 }
 
-export interface WebACLMatchRule extends Omit<WebACLRule<WebACLMatchStatement>, 'OverrideAction'> {
-    Action:WebACLAction
+export interface MatchRule extends Omit<WebACLRule<MatchStatement>,'OverrideAction'> {
+    Action:Action
 }
 
+export interface OverrideRule extends Omit<WebACLRule<OverrideStatement>,'Action'> {
+    OverrideAction:Override
+}
 
-export interface WebACLOverrideRule extends Omit<WebACLRule<WebACLOverrideStatement>, 'Action'> {
-    OverrideAction:WebACLOverride
+export interface DefaultAction {
+    Allow?: Allow
+    Block?: Block
 }
 
 export interface VisibilityConfig {
@@ -40,42 +44,24 @@ export interface VisibilityConfig {
     SampledRequestsEnabled:boolean
 }
 
-export type WafAction = WafAllow | WafBlock | WafCount
-
-export interface WafAllow {
-    Allow:WebACLAllow
+export interface Action extends DefaultAction {
+    Count?: Count
 }
 
-export interface WafBlock {
-    Block:WebACLBlock
-}
-
-export interface WafCount {
-    Count:WebACLCount
-}
-export interface WebACLDefaultAction {
-    Allow?: WebACLAllow
-    Block?: WebACLBlock
-}
-
-export interface WebACLAction extends WebACLDefaultAction {
-    Count?: WebACLCount
-}
-
-export interface WebACLOverride {
-    Count?: WebACLCount
+export interface Override {
+    Count?: Count
     None?: {}
 }
 
-export interface WebACLAllow {
+export interface Allow {
     CustomRequestHandling?:CustomRequestHandling
 }
 
-export interface WebACLBlock {
-    CustomResponse?:WebACLCustomResponse
+export interface Block {
+    CustomResponse?:CustomResponse
 }
 
-export interface WebACLCount extends WebACLAllow {}
+export interface Count extends Allow {}
 
 export interface CustomResponseBody {
     Content:string
@@ -86,7 +72,7 @@ export interface CustomResponseBodies {
     [name:string]: CustomResponseBody
 }
 
-export interface WebACLCustomResponse {
+export interface CustomResponse {
     ResponseCode:number
     CustomResponseBodyKey?:keyof CustomResponseBodies
     ResponseHeaders?:WebACLHeaders
@@ -96,7 +82,7 @@ export interface CustomRequestHandling {
     InsertHeaders:WebACLHeaders
 }
 
-export interface WebACLTag {
+export interface Tag {
     Key:string
     Value:string
 }
@@ -108,25 +94,7 @@ export interface WebACLHeader {
 
 export type WebACLHeaders = WebACLHeader[]
 
-export type WebACLNestableStatement = ByteMatchStatement | GeoMatchStatement | 
-    LabelMatchStatement | IPSetReferenceStatement | RegexPatternSetReferenceStatement |
-    SizeConstraintStatement | SqliMatchStatement | XssMatchStatement
-    
-
-export type WebACLOverrideStatement = ManagedRuleGroupStatement | RuleGroupReferenceStatement
-    
-export type WebACLActionStatement = WebACLNestableStatement | RateBasedStatement
-    
-export type WebACLUtilityStatement = AndStatement | OrStatement | NotStatement
-
-export type WebACLStatement = WebACLActionStatement | WebACLOverrideStatement | WebACLUtilityStatement
-
-export interface WebACLMatchStatement {
-    FieldToMatch:FieldToMatch
-    TextTransformations:TextTransformation[]
-}
-
-export interface ByteMatchStatement extends WebACLMatchStatement {
+export interface ByteMatchStatement extends MatchStatement {
     SearchString:Buffer | string
     PositionalConstraint: PositionalConstraint
 }
@@ -146,18 +114,18 @@ export interface LabelMatchStatement {
     Scope: 'LABEL' | 'NAMESPACE'
 }
 
-export interface RegexPatternSetReferenceStatement extends WebACLMatchStatement {
+export interface RegexPatternSetReferenceStatement extends MatchStatement {
     ARN:string
 }
 
-export interface SizeConstraintStatement extends WebACLMatchStatement {
+export interface SizeConstraintStatement extends MatchStatement {
     ComparisonOperator: ComparisonOperator
     Size:number
 }
 
-export interface SqliMatchStatement extends WebACLMatchStatement {}
+export interface SqliMatchStatement extends MatchStatement {}
 
-export interface XssMatchStatement extends WebACLMatchStatement {}
+export interface XssMatchStatement extends MatchStatement {}
 
 export interface RateBasedStatement {
     AggregateKeyType: 'IP' | 'FORWARDED_IP'
@@ -179,25 +147,25 @@ export interface RuleGroupReferenceStatement {
 }
 
 export interface NotStatement {
-    Statement:WebACLNestableStatement
+    Statement:NestableStatement
 }
 
 export interface OrStatement {
-    Statements: WebACLNestableStatement[]
+    Statements: NestableStatement[]
 }
 
 export interface AndStatement {
-    Statements: WebACLNestableStatement[]
+    Statements: NestableStatement[]
 }
 
 export interface FieldToMatch {
-    SingleHeader?:WebACLArgument
-    AllQueryArguments?:WebACLArgumentMap
-    SingleQueryArgument?:WebACLArgument
-    Body?:WebACLArgumentMap
-    Method?:WebACLArgumentMap
-    UriPath?:WebACLArgumentMap
-    QueryString?:WebACLArgumentMap
+    SingleHeader?:Argument
+    AllQueryArguments?:ArgumentMap
+    SingleQueryArgument?:Argument
+    Body?:ArgumentMap
+    Method?:ArgumentMap
+    UriPath?:ArgumentMap
+    QueryString?:ArgumentMap
     JsonBody?:JsonBody
 }
 
@@ -213,7 +181,7 @@ export interface JsonBody {
 }
 
 export interface MatchPattern {
-    All?:WebACLArgumentMap
+    All?:ArgumentMap
     IncludedPaths?:string[]
 }
 
@@ -223,11 +191,11 @@ export interface TextTransformation {
         'LOWERCASE' | 'CMD_LINE' | 'URL_DECODE'
 }
 
-export type WebACLArgument = {
+export type Argument = {
     Name: string
 }
 
-export type WebACLArgumentMap = {[name:string]:string}
+export type ArgumentMap = {[name:string]:string}
 
 export interface ForwardedIPConfig {
     FallbackBehavior: 'MATCH' | 'NO_MATCH'
@@ -267,6 +235,107 @@ export type CountryCode = "AF" | "AX" | "AL" | "DZ" | "AS" | "AD" | "AO" |
 
 export type CountryCodes = CountryCode[]
     
+
 export interface ExcludedRule {
     Name:string
+}
+
+export type NestableStatement = ByteMatchStatement | GeoMatchStatement | 
+LabelMatchStatement | IPSetReferenceStatement |RegexPatternSetReferenceStatement |
+SizeConstraintStatement | SqliMatchStatement | XssMatchStatement
+
+export type OverrideStatement = ManagedRuleGroupStatement |RuleGroupReferenceStatement
+    
+export type ActionStatement = NestableStatement | RateBasedStatement
+    
+export type UtilityStatement = AndStatement | OrStatement | NotStatement
+
+export type WebACLStatement = ActionStatement | OverrideStatement |UtilityStatement
+
+export interface MatchStatement {
+    FieldToMatch:FieldToMatch
+    TextTransformations:TextTransformation[]
+}
+
+export enum StatementProperty {
+    Byte = 'ByteMatchStatement',
+    Regex = 'RegexPatternSetStatement',
+    Size = 'SizeConstraintStatement',
+    Sql = 'SqliMatchStatement',
+    Xss = 'XssMatchStatement',
+    Geo = 'GeoMatchStatement',
+    Label = 'LabelMatchStatement',
+    IP = 'IPSetReferenceStatement',
+    Rate = 'RateBasedStatement',
+    Managed = 'ManagedRuleGroupStatement',
+    Group = 'RuleGroupReferenceStatement',
+    And = 'AndStatement',
+    Or = 'OrStatement',
+    Not = 'NotStatement',
+    None = ''
+}
+
+export interface ActionStatementProps {
+    allowHeaders?: {[name:string]:string} | boolean
+    blockHeaders?: {[name:string]:string} | boolean
+    countHeaders?: {[name:string]:string} | boolean
+}
+
+export enum TextTransformationProperty {
+    CommandLine = 'CMD_LINE',
+    Compress = 'COMPRESS_WHITE_SPACE',
+    HtmlDecode = 'HTML_ENTITY_DECODE',
+    Lowercase = 'LOWERCASE',
+    UrlDecode = 'URL_DECODE',
+    None = 'NONE'
+}
+
+export enum FieldToMatchProperty {
+    Header = 'SingleHeader',
+    Argument = 'SingleQueryArgument',
+    Arguments = 'AllQueryArguments',
+    Body = 'Body',
+    Method = 'Method',
+    Path = 'UriPath',
+    Query = 'QueryString',
+    Json = 'JsonBody'
+}
+
+export enum MatchScope {
+    All = 'ALL',
+    Key = 'KEY',
+    Value = 'VALUE'
+}
+
+export interface MatchStatementProps extends ActionStatementProps {
+    field: FieldToMatch
+    value?: string | string[]
+    scope?:MatchScope
+    textTransformations?:TextTransformationProperty[]
+}
+
+export interface StatementPropertyMap {
+    match:WebACLStatement[]
+    action:WebACLStatement[]
+    override:WebACLStatement[]
+    nestable:WebACLStatement[]
+    utility:WebACLStatement[]
+}
+
+export interface OverrideStatementProps {
+    countHeaders?: {[name:string]:string} | boolean
+}
+
+export type ActionProperty = Allow | Block | Count
+
+export interface AllowProperty {
+    Allow:Allow
+}
+
+export interface BlockProperty {
+    Block:Block
+}
+
+export interface CountProperty {
+    Count:Count
 }

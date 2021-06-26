@@ -1,7 +1,7 @@
 import {CfnWebACL} from '@aws-cdk/aws-wafv2';
 
 export class CFManagedStatement {
-    excluded: CfnWebACL.ExcludedRuleProperty[]
+    excluded: CfnWebACL.Sdk.ExcludedRuleProperty[]
 
     constructor(
         public name: string,
@@ -11,15 +11,15 @@ export class CFManagedStatement {
         this.exclude(...excluded);
     }
 
-    static get(name: string, vendor: string, excluded: string[] = []): CfnWebACL.StatementOneProperty {
+    static get(name: string, vendor: string, excluded: string[] = []): CfnWebACL.Sdk.StatementOneProperty {
         return (new CFManagedStatement(name,vendor,excluded)).get();
     }
 
-    static Get(name: string, vendor: string, excluded: string[] = []): CfnWebACL.StatementOneProperty {
+    static Get(name: string, vendor: string, excluded: string[] = []): CfnWebACL.Sdk.StatementOneProperty {
         return (new CFManagedStatement(name,vendor,excluded)).Get();
     }
 
-    get(): CfnWebACL.StatementOneProperty {
+    get(): CfnWebACL.Sdk.StatementOneProperty {
         return {
             managedRuleGroupStatement: this.getManagedStatement()
         }
@@ -45,7 +45,7 @@ export class CFManagedStatement {
         return this;
     }
 
-    getManagedStatement(): CfnWebACL.ManagedRuleGroupStatementProperty {
+    getManagedStatement(): CfnWebACL.Sdk.ManagedRuleGroupStatementProperty {
         return {
             name:this.name, 
             vendorName:this.vendor, 

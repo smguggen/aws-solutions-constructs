@@ -1,38 +1,36 @@
-import {WafActionStatement} from './action';
-import {    
-    ByteMatch, 
-    GeoMatch, 
-    LabelMatch, 
-    IPSetReference, 
-    RegexPatternSetReference,
-    SizeConstraint, 
-    SqliMatch, 
-    XssMatch
-} from './statements'
+import { StatementProperty } from '../../types';
+import { FindStatement, StatementInstance, NestableStatementInstance } from './find';
 export class WafUtilityStatement {
-    
-    getStatement($str:any):WafActionStatement {
-        if (typeof $str === 'string') {
-            const str = $str.toLowerCase();
-            if (str.startsWith('byte'))  return new ByteMatch();
-            if (str.startsWith('geo'))  return new GeoMatch();
-            if (str.startsWith('label'))  return new LabelMatch();
-            if (str.startsWith('ip'))  return new IPSetReference();
-            if (str.startsWith('reg'))  return new RegexPatternSetReference();
-            if (str.startsWith('size'))  return new SizeConstraint();
-            if (str.startsWith('sql'))  return new SqliMatch();
-            if (str.startsWith('xss'))  return new XssMatch();
-            throw new Error(`Can't find Statement to match the term ${$str}`);
+    private $list:StatementProperty[] = []
+
+    protected readonly finder = new FindStatement();
+
+    add(statement:StatementProperty | StatementInstance):this {
+        if (this.finder.isNestable(statement as StatementProperty | StatementInstance)) {
+            const nm = this.finder.getStatementName(statement);
+            if (!(this.$list).includes(nm)) {
+                this.$list.push(nm);
+            }
         }
-        if ($str instanceof ByteMatch ||
-            $str instanceof GeoMatch ||
-            $str instanceof LabelMatch ||
-            $str instanceof IPSetReference ||
-            $str instanceof RegexPatternSetReference ||
-            $str instanceof SizeConstraint ||
-            $str instanceof SqliMatch ||
-            $str instanceof XssMatch
-        ) return $str;
-        throw new Error('Invalid Nestable Statement')
+        return this;
+    }
+
+    remove(statement:StatementProperty | StatementInstance):this {
+        const nm = this.finder.getStatementName(statement);
+        this.$list = this.$list.filter(item => this.finder.getStatementName(item) !== nm,this)
+        return this;
+    }
+
+    get hasStatements():boolean {
+        return this.statements.length ? true : false;
+    }
+    get list():StatementProperty[] {
+        return this.$list;
+    }
+    get statements():NestableStatementInstance[] {
+        return this.list.map(item => this.find(item),this) as NestableStatementInstance[];
+    }
+    find(type:StatementProperty | StatementInstance):StatementInstance {
+        return this.finder.getStatement(type);
     }
 }

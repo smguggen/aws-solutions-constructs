@@ -1,5 +1,5 @@
 import { ActionBase } from './base'
-import {WafCount,WebACLHeaders} from '../../types'
+import {CountProperty,WebACLHeaders} from '../../types'
 
 export class CountAction extends ActionBase {
 
@@ -8,7 +8,7 @@ export class CountAction extends ActionBase {
         if (headers) this.insertHeaders(headers);
     }
 
-    get():WafCount {
+    get():CountProperty {
         const res:any = {
             Count:{}
         }

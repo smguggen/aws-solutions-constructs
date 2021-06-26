@@ -1,5 +1,5 @@
 import { ActionBase } from './base'
-import {WafBlock,WebACLHeaders,CustomResponseBodies} from '../../types'
+import {CustomResponseBodies,BlockProperty,WebACLHeaders} from '../../types'
 
 export class BlockAction extends ActionBase {
     ResponseCode?:number
@@ -12,7 +12,7 @@ export class BlockAction extends ActionBase {
         if (bodyKey) this.customResponseBodyKey(bodyKey);
     }
 
-    get():WafBlock {
+    get():BlockProperty {
         const res:any = {
             Block:{}
         }
